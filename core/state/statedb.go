@@ -18,15 +18,14 @@
 package state
 
 import (
+	"bytes"
 	// "errors"
 	"fmt"
 	"runtime"
 	"sort"
 	"sync"
 	"time"
-	"bytes"
 
-	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -37,6 +36,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/ethereum/go-ethereum/trie/trienode"
 	"github.com/ethereum/go-ethereum/trie/triestate"
@@ -723,35 +723,35 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 			if data.Root == (common.Hash{}) {
 				data.Root = types.EmptyRootHash
 			}
-			log.Info("RICHARD:account", "addr=", addr, "acc.Nonce=", acc.Nonce, "acc.Balance=", acc.Balance, "acc.CodeHash=", acc.CodeHash, "acc.root=", acc.Root)
+			//log.Info("RICHARD:account", "addr=", addr, "acc.Nonce=", acc.Nonce, "acc.Balance=", acc.Balance, "acc.CodeHash=", acc.CodeHash, "acc.root=", acc.Root)
 		}
 	}
-/*
-	// If snapshot unavailable or reading from it failed, load from the database
-	if data == nil {
-		if s.trie == nil {
-			tr, err := s.db.OpenTrie(s.originalRoot)
+	/*
+		// If snapshot unavailable or reading from it failed, load from the database
+		if data == nil {
+			if s.trie == nil {
+				tr, err := s.db.OpenTrie(s.originalRoot)
+				if err != nil {
+					s.setError(errors.New("failed to open trie tree"))
+					return nil
+				}
+				s.trie = tr
+			}
+			start := time.Now()
+			var err error
+			data, err = s.trie.GetAccount(addr)
+			if metrics.EnabledExpensive {
+				s.AccountReads += time.Since(start)
+			}
 			if err != nil {
-				s.setError(errors.New("failed to open trie tree"))
+				s.setError(fmt.Errorf("getDeleteStateObject (%x) error: %w", addr.Bytes(), err))
 				return nil
 			}
-			s.trie = tr
+			if data == nil {
+				return nil
+			}
 		}
-		start := time.Now()
-		var err error
-		data, err = s.trie.GetAccount(addr)
-		if metrics.EnabledExpensive {
-			s.AccountReads += time.Since(start)
-		}
-		if err != nil {
-			s.setError(fmt.Errorf("getDeleteStateObject (%x) error: %w", addr.Bytes(), err))
-			return nil
-		}
-		if data == nil {
-			return nil
-		}
-	}
-*/
+	*/
 	// Insert into the live set
 	obj := newObject(s, addr, data)
 	s.setStateObject(obj)
@@ -1659,8 +1659,8 @@ func (s *StateDB) Commit(block uint64, postCommitFunc func() error) (common.Hash
 }
 
 func (s *StateDB) SetStaleForUnverifiedDiff() {
-        toStaleSnap := s.snaps.Snapshot(s.expectedRoot)
-        if toStaleSnap != nil {
+	toStaleSnap := s.snaps.Snapshot(s.expectedRoot)
+	if toStaleSnap != nil {
 		if !toStaleSnap.Verified() {
 			toStaleSnap.SetStale()
 		}
@@ -1728,7 +1728,7 @@ func (s *StateDB) CommitUnVerifiedSnapDifflayer(deleteEmptyObjects bool) {
 
 	if s.snap != nil {
 		if parent := s.snap.Root(); parent != s.expectedRoot {
-			s.DumpDiff(s.expectedRoot, parent,s.r_accounts, s.r_storages, s.r_destructs)
+			//s.DumpDiff(s.expectedRoot, parent, s.r_accounts, s.r_storages, s.r_destructs)
 			err := s.snaps.Update(s.expectedRoot, parent, s.r_destructs, s.r_accounts, s.r_storages, false)
 			if err != nil {
 				log.Warn("Failed to update snapshot tree", "from", parent, "to", s.expectedRoot, "err", err)
@@ -1903,7 +1903,6 @@ func copy2DSet[k comparable](set map[k]map[common.Hash][]byte) map[k]map[common.
 	return copied
 }
 
-
 func CompareSnapDiff(block uint64, snap snapshot.Snapshot, accounts map[common.Hash][]byte, storages map[common.Hash]map[common.Hash][]byte, destructs map[common.Hash]struct{}) {
 	wg := sync.WaitGroup{}
 	wg.Add(1)
@@ -1972,10 +1971,10 @@ func CompareSnapDiff(block uint64, snap snapshot.Snapshot, accounts map[common.H
 				}
 
 				for _, storage := range storages {
-                                        if len(storage) == 0 {
-                                                emptyNum--
-                                        }
-                                }
+					if len(storage) == 0 {
+						emptyNum--
+					}
+				}
 			} else {
 				emptyNum = len(d_storages) - len(storages)
 				for _, storage := range storages {
@@ -1985,14 +1984,14 @@ func CompareSnapDiff(block uint64, snap snapshot.Snapshot, accounts map[common.H
 				}
 
 				for _, storage := range d_storages {
-                                        if len(storage) == 0 {
-                                                emptyNum--
-                                        }
-                                }
+					if len(storage) == 0 {
+						emptyNum--
+					}
+				}
 			}
 			if emptyNum != 0 {
-				DumpStorage(storages)
-				DumpStorage(d_storages)
+				//DumpStorage(storages)
+				//DumpStorage(d_storages)
 				panic(fmt.Sprintf("Storages is not the same len, block=%d, d_len=%d len=%d", block, len(d_storages), len(storages)))
 			}
 		}
@@ -2024,31 +2023,31 @@ func DumpStorage(storages map[common.Hash]map[common.Hash][]byte) {
 	log.Info("Richard_s:", "len_s=", len(storages))
 	for addrHash, storage := range storages {
 		log.Info("Richard:", "addrHash=", addrHash, "len=", len(storage))
-		for k,v := range storage {
+		for k, v := range storage {
 			log.Info("Richard:", "addr=", addrHash, "k=", k, "v=", v)
 		}
 	}
 }
 
 func (s *StateDB) DumpDiff(eRoot common.Hash, pRoot common.Hash, accounts map[common.Hash][]byte, storages map[common.Hash]map[common.Hash][]byte, destructs map[common.Hash]struct{}) {
-        log.Info("Richard: start dump", "eRoot=", eRoot, "pRoot=", pRoot)
-        log.Info("Richard:", "len_a=", len(accounts))
-        for addrHash, acc_d := range accounts {
-                acc := new(types.SlimAccount)
-                if err := rlp.DecodeBytes(acc_d, acc); err != nil {
-                       panic(err)
-                }
-                log.Info("Richard:", "addrHash=", addrHash, "acc.b=", acc.Balance, "acc.n=", acc.Nonce, "acc.c=", acc.CodeHash, "acc.root=", acc.Root)
-        }
-        log.Info("Richard:", "len_s=", len(storages))
-        for addrHash, storage := range storages {
-                log.Info("Richard:", "addrHash=", addrHash, "len_s_s=", len(storage))
-                for k,v := range storage {
-                        log.Info("Richard:", "addrHash=", addrHash, "k=", k, "v=", v)
-                }
-        }
-        log.Info("Richard:", "len_d=", len(destructs))
-        for addrHash := range destructs {
-                log.Info("Richard:", "d_addrHash=", addrHash)
-        }
+	log.Info("Richard: start dump", "eRoot=", eRoot, "pRoot=", pRoot)
+	log.Info("Richard:", "len_a=", len(accounts))
+	for addrHash, acc_d := range accounts {
+		acc := new(types.SlimAccount)
+		if err := rlp.DecodeBytes(acc_d, acc); err != nil {
+			panic(err)
+		}
+		log.Info("Richard:", "addrHash=", addrHash, "acc.b=", acc.Balance, "acc.n=", acc.Nonce, "acc.c=", acc.CodeHash, "acc.root=", acc.Root)
+	}
+	log.Info("Richard:", "len_s=", len(storages))
+	for addrHash, storage := range storages {
+		log.Info("Richard:", "addrHash=", addrHash, "len_s_s=", len(storage))
+		for k, v := range storage {
+			log.Info("Richard:", "addrHash=", addrHash, "k=", k, "v=", v)
+		}
+	}
+	log.Info("Richard:", "len_d=", len(destructs))
+	for addrHash := range destructs {
+		log.Info("Richard:", "d_addrHash=", addrHash)
+	}
 }

@@ -383,9 +383,9 @@ func (st *StateTransition) TransitionDb() (r *ExecutionResult, e error) {
 		return nil, err
 	}
 
-	log.Info("tx transit start", "caller", st.msg.From, "to", st.msg.To, "initialGas", st.initialGas, "value", st.msg.Value.Uint64())
+	log.AsyncLog("tx transit start", "caller", st.msg.From, "to", st.msg.To, "initialGas", st.initialGas, "value", st.msg.Value.Uint64())
 	defer func() { // Lazy evaluation of the parameters
-		log.Info("tx transit end", "ret", r, "gasRemaining", st.gasRemaining, "err", e)
+		log.AsyncLog("tx transit end", "ret", r, "gasRemaining", st.gasRemaining, "err", e)
 	}()
 	if tracer := st.evm.Config.Tracer; tracer != nil {
 		tracer.CaptureTxStart(st.initialGas)
@@ -415,12 +415,12 @@ func (st *StateTransition) TransitionDb() (r *ExecutionResult, e error) {
 	if err != nil {
 		return nil, err
 	}
-	log.Info("Richard:", "st.gasRemain=", st.gasRemaining, "gas=", gas)
+	//log.Info("Richard:", "st.gasRemain=", st.gasRemaining, "gas=", gas)
 	if st.gasRemaining < gas {
 		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, gas)
 	}
 	st.gasRemaining -= gas
-	log.Info("Richard419:", "st.gasRemain=", st.gasRemaining)
+	//log.Info("Richard419:", "st.gasRemain=", st.gasRemaining)
 
 	// Check clause 6
 	value, overflow := uint256.FromBig(msg.Value)
@@ -447,12 +447,12 @@ func (st *StateTransition) TransitionDb() (r *ExecutionResult, e error) {
 	)
 	if contractCreation {
 		ret, _, st.gasRemaining, vmerr = st.evm.Create(sender, msg.Data, st.gasRemaining, value)
-		log.Info("Richard445:", "st.gasRemain=", st.gasRemaining)
+		//log.Info("Richard445:", "st.gasRemain=", st.gasRemaining)
 	} else {
 		// Increment the nonce for the next transaction
 		st.state.SetNonce(msg.From, st.state.GetNonce(sender.Address())+1)
 		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), msg.Data, st.gasRemaining, value)
-		log.Info("Richard450:", "st.gasRemain=", st.gasRemaining)
+		//log.Info("Richard450:", "st.gasRemain=", st.gasRemaining)
 	}
 
 	var gasRefund uint64
@@ -515,7 +515,7 @@ func (st *StateTransition) refundGas(refundQuotient uint64) uint64 {
 
 // gasUsed returns the amount of gas used up by the state transition.
 func (st *StateTransition) gasUsed() uint64 {
-	log.Info("Richard:", "st.initGas=", st.initialGas, "st.gasRemain=", st.gasRemaining)
+	//log.Info("Richard:", "st.initGas=", st.initialGas, "st.gasRemain=", st.gasRemaining)
 	return st.initialGas - st.gasRemaining
 }
 

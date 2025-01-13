@@ -24,10 +24,10 @@ import (
 	"io"
 	"time"
 
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
@@ -257,10 +257,10 @@ func (dl *diffLayer) Journal(buffer *bytes.Buffer) (common.Hash, error) {
 	accounts := make([]journalAccount, 0, len(dl.accountData))
 	log.Info("RICH:", "len_a=", len(dl.accountData))
 	for hash, blob := range dl.accountData {
-                acc := new(types.SlimAccount)
-                if err := rlp.DecodeBytes(blob, acc); err != nil {
-                        panic(err)
-                }
+		acc := new(types.SlimAccount)
+		if err := rlp.DecodeBytes(blob, acc); err != nil {
+			panic(err)
+		}
 		log.Info("RICH:", "addrHash=", hash, "acc.b=", acc.Balance, "acc.n=", acc.Nonce, "acc.c=", acc.CodeHash, "acc.root=", acc.Root)
 		accounts = append(accounts, journalAccount{Hash: hash, Blob: blob})
 	}
@@ -276,7 +276,7 @@ func (dl *diffLayer) Journal(buffer *bytes.Buffer) (common.Hash, error) {
 		for key, val := range slots {
 			keys = append(keys, key)
 			vals = append(vals, val)
-			log.Info("Richard:", "addrHash=", hash, "k=", key, "v=", val)
+			//log.Info("Richard:", "addrHash=", hash, "k=", key, "v=", val)
 		}
 		storage = append(storage, journalStorage{Hash: hash, Keys: keys, Vals: vals})
 	}

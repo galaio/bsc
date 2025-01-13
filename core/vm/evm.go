@@ -238,9 +238,9 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 	evm.Context.Transfer(evm.StateDB, caller.Address(), addr, value)
 
 	// Capture the tracer start/end events in debug mode
-	log.Info("call start", "depth", evm.depth, "caller", caller.Address(), "addr", addr, "gas", gas, "value", value.Uint64())
+	log.AsyncLog("call start", "depth", evm.depth, "caller", caller.Address(), "addr", addr, "gas", gas, "value", value.Uint64())
 	defer func(startGas uint64) { // Lazy evaluation of the parameters
-		log.Info("call end", "depth", evm.depth, "ret", len(ret), "leftOverGas", leftOverGas, "err", err)
+		log.AsyncLog("call end", "depth", evm.depth, "ret", len(ret), "usedGas", startGas-gas, "err", err)
 	}(gas)
 	if debug {
 		if evm.depth == 0 {
@@ -312,9 +312,9 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 	var snapshot = evm.StateDB.Snapshot()
 
 	// Invoke tracer hooks that signal entering/exiting a call frame
-	log.Info("callcode start", "depth", evm.depth, "caller", caller.Address(), "addr", addr, "gas", gas, "value", value.Uint64())
+	log.AsyncLog("callcode start", "depth", evm.depth, "caller", caller.Address(), "addr", addr, "gas", gas, "value", value.Uint64())
 	defer func(startGas uint64) { // Lazy evaluation of the parameters
-		log.Info("callcode end", "depth", evm.depth, "ret", len(ret), "leftOverGas", leftOverGas, "err", err)
+		log.AsyncLog("callcode end", "depth", evm.depth, "ret", len(ret), "leftOverGas", leftOverGas, "err", err)
 	}(gas)
 	if evm.Config.Tracer != nil {
 		evm.Config.Tracer.CaptureEnter(CALLCODE, caller.Address(), addr, input, gas, value.ToBig())
@@ -357,9 +357,9 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 	var snapshot = evm.StateDB.Snapshot()
 
 	// Invoke tracer hooks that signal entering/exiting a call frame
-	log.Info("delegatecall start", "depth", evm.depth, "caller", caller.Address(), "addr", addr, "gas", gas)
+	log.AsyncLog("delegatecall start", "depth", evm.depth, "caller", caller.Address(), "addr", addr, "gas", gas)
 	defer func() { // Lazy evaluation of the parameters
-		log.Info("delegatecall end", "depth", evm.depth, "ret", len(ret), "leftOverGas", leftOverGas, "err", err)
+		log.AsyncLog("delegatecall end", "depth", evm.depth, "ret", len(ret), "leftOverGas", leftOverGas, "err", err)
 	}()
 	if evm.Config.Tracer != nil {
 		// NOTE: caller must, at all times be a contract. It should never happen
@@ -415,9 +415,9 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 	evm.StateDB.AddBalance(addr, new(uint256.Int))
 
 	// Invoke tracer hooks that signal entering/exiting a call frame
-	log.Info("staticcall start", "depth", evm.depth, "caller", caller.Address(), "addr", addr, "gas", gas)
+	log.AsyncLog("staticcall start", "depth", evm.depth, "caller", caller.Address(), "addr", addr, "gas", gas)
 	defer func() { // Lazy evaluation of the parameters
-		log.Info("staticcall end", "depth", evm.depth, "ret", len(ret), "leftOverGas", leftOverGas, "err", err)
+		log.AsyncLog("staticcall end", "depth", evm.depth, "ret", len(ret), "leftOverGas", leftOverGas, "err", err)
 	}()
 	if evm.Config.Tracer != nil {
 		evm.Config.Tracer.CaptureEnter(STATICCALL, caller.Address(), addr, input, gas, nil)
@@ -502,9 +502,9 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	contract := NewContract(caller, AccountRef(address), value, gas)
 	contract.SetCodeOptionalHash(&address, codeAndHash)
 
-	log.Info("create start", "depth", evm.depth, "caller", caller.Address(), "addr", address, "gas", gas, "value", value.Uint64())
+	log.AsyncLog("create start", "depth", evm.depth, "caller", caller.Address(), "addr", address, "gas", gas, "value", value.Uint64())
 	defer func() { // Lazy evaluation of the parameters
-		log.Info("create end", "depth", evm.depth, "ret", len(r), "contract.gas", b, "err", err)
+		log.AsyncLog("create end", "depth", evm.depth, "ret", len(r), "contract.gas", b, "err", err)
 	}()
 	if evm.Config.Tracer != nil {
 		if evm.depth == 0 {

@@ -336,7 +336,7 @@ type BlockChain struct {
 	doubleSignMonitor *monitor.DoubleSignMonitor
 
 	verifyTaskCh      chan *VerifyTask
-	skipNextTask	  bool
+	skipNextTask      bool
 	verifyHeaderCache *lru.Cache[common.Hash, *types.Header]
 	verifyTdCache     *lru.Cache[common.Hash, *big.Int] // most recent total difficulties
 	verifyNumberCache *lru.Cache[common.Hash, uint64]   // most recent block numbers
@@ -2329,7 +2329,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		}
 		blockExecutionTimer.Update(time.Since(pstart))
 
-		log.Info("Richard:", "block=", block.Number())
+		//log.Info("Richard:", "block=", block.Number())
 		statedb.CommitUnVerifiedSnapDifflayer(bc.chainConfig.IsEIP158(block.Number()))
 		pipeSnapshotCommitTimer.Update(statedb.PipeSnapshotCommits)
 		// Add to cache
@@ -2386,9 +2386,9 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 	//		stats.queued++
 	//	}
 	//}
-        var errTask   *VerifyTask
-        var firstErrIndex  int
-        var isFirst   bool
+	var errTask *VerifyTask
+	var firstErrIndex int
+	var isFirst bool
 
 	start := time.Now()
 	for _, task := range tasks {
@@ -2398,15 +2398,15 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 		if task.err != nil {
 			if !isFirst {
-                                isFirst = true
-                                firstErrIndex = task.index
+				isFirst = true
+				firstErrIndex = task.index
 				errTask = task
-                	}
-                        // Remove from cache
-                        bc.blockCache.Remove(task.block.Hash())
-                        bc.verifyHeaderCache.Remove(task.block.Hash())
-                        bc.verifyNumberCache.Remove(task.block.Hash())
-                        bc.verifyTdCache.Remove(task.block.Hash())
+			}
+			// Remove from cache
+			bc.blockCache.Remove(task.block.Hash())
+			bc.verifyHeaderCache.Remove(task.block.Hash())
+			bc.verifyNumberCache.Remove(task.block.Hash())
+			bc.verifyTdCache.Remove(task.block.Hash())
 
 			// Set snap diff to stale
 			// task.state.SetStaleForUnverifiedDiff()
@@ -2416,32 +2416,32 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			// return task.index, errors.New("verification failed")
 		}
 	}
-/*
-        if errTask != nil {
-                // Set snapshot diff layers to stale for errTask
-                errTask.state.SetStaleForUnverifiedDiffs()
-                if err := bc.SetHead(errTask.block.NumberU64() - 1); err != nil {
-                        log.Info("Richard:", "set head block=", errTask.block.NumberU64() - 1, "errTask=", errTask)
-                        return errTask.index, err
-                }
-        }
-*/
+	/*
+	   if errTask != nil {
+	           // Set snapshot diff layers to stale for errTask
+	           errTask.state.SetStaleForUnverifiedDiffs()
+	           if err := bc.SetHead(errTask.block.NumberU64() - 1); err != nil {
+	                   log.Info("Richard:", "set head block=", errTask.block.NumberU64() - 1, "errTask=", errTask)
+	                   return errTask.index, err
+	           }
+	   }
+	*/
 	bc.skipNextTask = false
 
-        if retErr != nil && errTask == nil {
-                log.Info("Richard:", "err=", retErr, "it=", it)
-                return it.index, retErr
-        }
+	if retErr != nil && errTask == nil {
+		//log.Info("Richard:", "err=", retErr, "it=", it)
+		return it.index, retErr
+	}
 
-        if retErr == nil && errTask != nil {
-                return firstErrIndex, errTask.err
-        } else if retErr != nil && errTask != nil {
-                if firstErrIndex > it.index{
-                        return it.index, retErr
-                } else {
-                        return firstErrIndex, errTask.err
-                }
-        }	
+	if retErr == nil && errTask != nil {
+		return firstErrIndex, errTask.err
+	} else if retErr != nil && errTask != nil {
+		if firstErrIndex > it.index {
+			return it.index, retErr
+		} else {
+			return firstErrIndex, errTask.err
+		}
+	}
 
 	blockWaitResultTimer.UpdateSince(start)
 	stats.ignored += it.remaining()
@@ -2473,58 +2473,58 @@ func (bc *BlockChain) VerifyLoop() {
 				log.Info("Verify task done")
 				return
 			}
-		if !bc.skipNextTask{
+			if !bc.skipNextTask {
 
-			vstart := time.Now()
-			var err error
-			if err = bc.validator.ValidateState(task.block, task.state, task.receipts, task.usedGas); err != nil {
-				log.Error("validate state failed", "error", err)
-				task.err = err
+				vstart := time.Now()
+				var err error
+				if err = bc.validator.ValidateState(task.block, task.state, task.receipts, task.usedGas); err != nil {
+					log.Error("validate state failed", "error", err)
+					task.err = err
+				}
+				blockValidationTimer.UpdateSince(vstart)
+
+				cstart := time.Now()
+				if err == nil {
+					//log.Info("richard:validate successfully", "block=", task.block.Number())
+					wg.Add(1)
+					go func() {
+						cstart := time.Now()
+						if err = bc.commitState(task.block, task.receipts, task.state); err != nil {
+							task.err = err
+							log.Error("commit state failed", "error", err)
+						}
+						blockWriteTimer.UpdateSince(cstart)
+						wg.Done()
+					}()
+					wg.Add(1)
+					go func() {
+						cstart := time.Now()
+						if _, err = bc.writeBlockAndSetHead(task.block, task.receipts, task.logs, task.state, false); err != nil {
+							task.err = err
+							log.Error("write block and set head failed", "error", err)
+						}
+						bc.chainBlockFeed.Send(ChainHeadEvent{task.block})
+						blockCommitTimer.UpdateSince(cstart)
+						wg.Done()
+					}()
+
+					wg.Wait()
+				}
+				if task.err != nil {
+					bc.skipNextTask = true
+				}
+				task.done = true
+				close(task.doneCh)
+
+				blockWriteTotalTimer.UpdateSince(cstart)
+				triedbCommitTimer.Update(task.state.TrieDBCommits)
+				trieCommitTimer.Update(task.state.TrieCommits)
+				CodeCommitTimer.Update(task.state.CodeCommit)
+				snapshotCommitTimer.Update(task.state.SnapshotCommits)
+			} else {
+				task.done = true
+				close(task.doneCh)
 			}
-			blockValidationTimer.UpdateSince(vstart)
-
-			cstart := time.Now()
-			if err == nil {
-				log.Info("richard:validate successfully", "block=", task.block.Number())
-				wg.Add(1)
-				go func() {
-					cstart := time.Now()
-					if err = bc.commitState(task.block, task.receipts, task.state); err != nil {
-						task.err = err
-						log.Error("commit state failed", "error", err)
-					}
-					blockWriteTimer.UpdateSince(cstart)
-					wg.Done()
-				}()
-				wg.Add(1)
-				go func() {
-					cstart := time.Now()
-					if _, err = bc.writeBlockAndSetHead(task.block, task.receipts, task.logs, task.state, false); err != nil {
-						task.err = err
-						log.Error("write block and set head failed", "error", err)
-					}
-					bc.chainBlockFeed.Send(ChainHeadEvent{task.block})
-					blockCommitTimer.UpdateSince(cstart)
-					wg.Done()
-				}()
-
-				wg.Wait()
-			}
-			if task.err != nil {
-				bc.skipNextTask = true
-			}
-			task.done = true
-			close(task.doneCh)
-
-			blockWriteTotalTimer.UpdateSince(cstart)
-			triedbCommitTimer.Update(task.state.TrieDBCommits)
-			trieCommitTimer.Update(task.state.TrieCommits)
-			CodeCommitTimer.Update(task.state.CodeCommit)
-			snapshotCommitTimer.Update(task.state.SnapshotCommits)
-	} else {
-		 task.done = true
-		 close(task.doneCh)
-	}
 		}
 	}
 }

@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/misc"
@@ -30,6 +29,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 )
 
@@ -104,6 +104,10 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	// usually do have two tx, one for validator set contract, another for system reward contract.
 	systemTxs := make([]*types.Transaction, 0, 2)
 
+	log.AsyncLog("block start", "block", block.Number().Uint64(), "hash", block.Hash(), "gasused", block.GasUsed())
+	defer func() { // Lazy evaluation of the parameters
+		log.AsyncLog("block end", "block", block.Number().Uint64(), "hash", block.Hash())
+	}()
 	for i, tx := range block.Transactions() {
 		if isPoSA {
 			if isSystemTx, err := posa.IsSystemTransaction(tx, block.Header()); err != nil {
@@ -111,10 +115,11 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 				return statedb, nil, nil, 0, err
 			} else if isSystemTx {
 				systemTxs = append(systemTxs, tx)
-				log.Info("Richard:", "tx is system txn")
+				//log.Info("Richard:", "tx is system txn")
 				continue
 			}
 		}
+		log.AsyncLog("tx start", "index", i, "tx", tx.Hash())
 		if p.config.IsCancun(block.Number(), block.Time()) {
 			if len(systemTxs) > 0 {
 				// systemTxs should be always at the end of block.
@@ -131,8 +136,12 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 
 		receipt, err := applyTransaction(msg, p.config, gp, statedb, blockNumber, blockHash, tx, usedGas, vmenv, bloomProcessors)
 
-		log.Info("Richard:", "block=", blockNumber, "usedGas=", *usedGas, "i=", i, "tx_hash=", tx.Hash(), "msg=", msg)
-
+		//log.Info("Richard:", "block=", blockNumber, "usedGas=", *usedGas, "i=", i, "tx_hash=", tx.Hash(), "msg=", msg)
+		if err != nil {
+			log.AsyncLog("tx end", "index", i, "err", err)
+		} else {
+			log.AsyncLog("tx end", "index", i, "GasUsed", receipt.GasUsed)
+		}
 		if err != nil {
 			bloomProcessors.Close()
 			return statedb, nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
@@ -148,7 +157,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		return nil, nil, nil, 0, errors.New("withdrawals before shanghai")
 	}
 
-	log.Info("Richard: process", "usedGas=", usedGas)
+	//log.Info("Richard: process", "usedGas=", usedGas)
 
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 	err := p.engine.Finalize(p.bc, header, statedb, &commonTxs, block.Uncles(), withdrawals, &receipts, &systemTxs, usedGas)
@@ -172,18 +181,18 @@ func applyTransaction(msg *Message, config *params.ChainConfig, gp *GasPool, sta
 	if err != nil {
 		return nil, err
 	}
-	log.Info("Richard:", "result.UsedGas=", result.UsedGas)
+	//log.Info("Richard:", "result.UsedGas=", result.UsedGas)
 	// Update the state with pending changes.
 	var root []byte
 	if config.IsByzantium(blockNumber) {
 		statedb.Finalise(true)
 	} else {
 		root = statedb.IntermediateRoot(config.IsEIP158(blockNumber)).Bytes()
-		panic("Richard, no ...... .....")
+		//panic("Richard, no ...... .....")
 	}
-	log.Info("Richard:", "usedGas_b=", *usedGas)
+	//log.Info("Richard:", "usedGas_b=", *usedGas)
 	*usedGas += result.UsedGas
-	log.Info("Richard:", "usedGas=", *usedGas)
+	//log.Info("Richard:", "usedGas=", *usedGas)
 	// Create a new receipt for the transaction, storing the intermediate root and gas used
 	// by the tx.
 	receipt := &types.Receipt{Type: tx.Type(), PostState: root, CumulativeGasUsed: *usedGas}

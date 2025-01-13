@@ -17,6 +17,7 @@
 package vm
 
 import (
+	"golang.org/x/crypto/sha3"
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -170,9 +171,9 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	}()
 	contract.Input = input
 
-	log.Info("interpreter run start", "depth", in.evm.depth, "caller", contract.CallerAddress, "contract", contract.Address(), "cotract.gas", contract.Gas)
+	log.AsyncLog("interpreter run start", "depth", in.evm.depth, "caller", contract.CallerAddress, "contract", contract.Address(), "cotract.gas", contract.Gas, "code", sha3.Sum256(contract.Code), "input", sha3.Sum256(input))
 	defer func() { // Lazy evaluation of the parameters
-		log.Info("interpreter run end", "depth", in.evm.depth, "ret", len(ret), "cotract.gas", contract.Gas, "err", err)
+		log.AsyncLog("interpreter run end", "depth", in.evm.depth, "ret", ret, "cotract.gas", contract.Gas, "err", err)
 	}()
 	if debug {
 		defer func() {
@@ -248,8 +249,19 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			logged = true
 		}
 		// execute the operation
+		var stack0, stack1 []byte
+		if callContext.Stack.len() > 1 {
+			stack0 = callContext.Stack.Back(0).Bytes()
+			stack1 = callContext.Stack.Back(1).Bytes()
+		} else if callContext.Stack.len() > 0 {
+			stack0 = callContext.Stack.Back(0).Bytes()
+		}
 		res, err = operation.execute(&pc, in, callContext)
-		log.Info("op execute", "depth", in.evm.depth, "op", op, "cost", cost, "cotract.gas", contract.Gas, "err", err)
+		var sback0 []byte
+		if callContext.Stack.len() > 0 {
+			sback0 = callContext.Stack.Back(0).Bytes()
+		}
+		log.AsyncLog("op execute", "depth", in.evm.depth, "op", op, "cost", cost, "cotract.gas", contract.Gas, "stack0", stack0, "stack1", stack1, "ret", res, "sback0", sback0, "err", err)
 		if err != nil {
 			break
 		}

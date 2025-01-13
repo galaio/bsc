@@ -1,6 +1,9 @@
 package log
 
 import (
+	"bytes"
+	"encoding/hex"
+	"fmt"
 	"os"
 	"sync/atomic"
 	"time"
@@ -25,6 +28,92 @@ func SetDefault(l Logger) {
 // Root returns the root logger
 func Root() Logger {
 	return root.Load().(Logger)
+}
+
+type AsyncLogItem struct {
+	msg  string
+	args []interface{}
+}
+
+func (l *AsyncLogItem) Format() []byte {
+	sb := bytes.NewBuffer(nil)
+	sb.WriteString(l.msg)
+	sb.WriteString(" ")
+	for i := 0; i < len(l.args); i += 2 {
+		if i+1 >= len(l.args) {
+			break
+		}
+		if i > 0 {
+			sb.WriteString(" ")
+		}
+		if b, ok := (l.args[i+1]).([]byte); ok {
+			sb.WriteString(fmt.Sprintf("%v=%v", l.args[i], hex.EncodeToString(b)))
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("%v=%v", l.args[i], l.args[i+1]))
+	}
+	sb.WriteByte('\n')
+	return sb.Bytes()
+}
+
+type AsyncLogger struct {
+	f       *os.File
+	logChan chan []AsyncLogItem
+	stop    chan struct{}
+	buffer  []AsyncLogItem
+}
+
+func NewAsyncLogger(path string) *AsyncLogger {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		panic(err)
+	}
+	return &AsyncLogger{
+		f:       f,
+		logChan: make(chan []AsyncLogItem, 100000),
+		stop:    make(chan struct{}),
+		buffer:  make([]AsyncLogItem, 0, 10000),
+	}
+}
+
+func (l *AsyncLogger) Write(msg string, ctx []interface{}) {
+	if len(l.buffer) < cap(l.buffer) {
+		l.buffer = append(l.buffer, AsyncLogItem{
+			msg:  msg,
+			args: ctx,
+		})
+		return
+	}
+	l.logChan <- l.buffer
+	l.buffer = make([]AsyncLogItem, 0, 10000)
+}
+
+func (l *AsyncLogger) AsyncFlush() {
+	for {
+		select {
+		case items := <-l.logChan:
+			for _, item := range items {
+				l.f.Write(item.Format())
+			}
+			l.f.Sync()
+		case <-l.stop:
+			return
+		}
+	}
+}
+
+func (l *AsyncLogger) Start() {
+	go l.AsyncFlush()
+}
+
+func (l *AsyncLogger) Stop() {
+	close(l.stop)
+}
+
+var AsyncLoggerRoot = NewAsyncLogger("./tracer.log")
+
+func AsyncLog(msg string, ctx ...interface{}) {
+	AsyncLoggerRoot.Write(msg, ctx)
 }
 
 // The following functions bypass the exported logger methods (logger.Debug,
