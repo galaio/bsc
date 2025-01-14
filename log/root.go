@@ -77,15 +77,15 @@ func NewAsyncLogger(path string) *AsyncLogger {
 }
 
 func (l *AsyncLogger) Write(msg string, ctx []interface{}) {
-	if len(l.buffer) < cap(l.buffer) {
-		l.buffer = append(l.buffer, AsyncLogItem{
-			msg:  msg,
-			args: ctx,
-		})
-		return
-	}
-	l.logChan <- l.buffer
-	l.buffer = make([]AsyncLogItem, 0, 10000)
+	//if len(l.buffer) < cap(l.buffer) {
+	//	l.buffer = append(l.buffer, AsyncLogItem{
+	//		msg:  msg,
+	//		args: ctx,
+	//	})
+	//	return
+	//}
+	//l.logChan <- l.buffer
+	//l.buffer = make([]AsyncLogItem, 0, 10000)
 }
 
 func (l *AsyncLogger) AsyncFlush() {
