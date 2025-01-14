@@ -405,9 +405,11 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		diffQueue:          prque.New[int64, *types.DiffLayer](nil),
 		diffQueueBuffer:    make(chan *types.DiffLayer),
 		verifyTaskCh:       make(chan *VerifyTask, 32),
-		verifyHeaderCache:  lru.NewCache[common.Hash, *types.Header](128),
-		verifyTdCache:      lru.NewCache[common.Hash, *big.Int](128),
-		verifyNumberCache:  lru.NewCache[common.Hash, uint64](128),
+		// Attention: the evm need max 256 block history now, so we must set cache large than it.
+		// Or we must flush the block in every 1024?
+		verifyHeaderCache: lru.NewCache[common.Hash, *types.Header](1024),
+		verifyTdCache:     lru.NewCache[common.Hash, *big.Int](1024),
+		verifyNumberCache: lru.NewCache[common.Hash, uint64](1024),
 	}
 	bc.flushInterval.Store(int64(cacheConfig.TrieTimeLimit))
 	bc.forker = NewForkChoice(bc, shouldPreserve)
