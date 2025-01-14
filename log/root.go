@@ -77,15 +77,15 @@ func NewAsyncLogger(path string) *AsyncLogger {
 }
 
 func (l *AsyncLogger) Write(msg string, ctx []interface{}) {
-	//if len(l.buffer) < cap(l.buffer) {
-	//	l.buffer = append(l.buffer, AsyncLogItem{
-	//		msg:  msg,
-	//		args: ctx,
-	//	})
-	//	return
-	//}
-	//l.logChan <- l.buffer
-	//l.buffer = make([]AsyncLogItem, 0, 10000)
+	if len(l.buffer) < cap(l.buffer) {
+		l.buffer = append(l.buffer, AsyncLogItem{
+			msg:  msg,
+			args: ctx,
+		})
+		return
+	}
+	l.logChan <- l.buffer
+	l.buffer = make([]AsyncLogItem, 0, 10000)
 }
 
 func (l *AsyncLogger) AsyncFlush() {
@@ -113,7 +113,7 @@ func (l *AsyncLogger) Stop() {
 var AsyncLoggerRoot = NewAsyncLogger("./tracer.log")
 
 func AsyncLog(msg string, ctx ...interface{}) {
-	AsyncLoggerRoot.Write(msg, ctx)
+	//AsyncLoggerRoot.Write(msg, ctx)
 }
 
 // The following functions bypass the exported logger methods (logger.Debug,
