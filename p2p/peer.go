@@ -384,11 +384,13 @@ func (p *Peer) readLoop(errc chan<- error) {
 	for {
 		msg, err := p.rw.ReadMsg()
 		if err != nil {
+			p.Log().Debug("readLoop readMsg error", "peer", p.ID(), "err", err)
 			errc <- err
 			return
 		}
 		msg.ReceivedAt = time.Now()
 		if err = p.handle(msg); err != nil {
+			p.Log().Debug("readLoop handle error", "peer", p.ID(), "err", err)
 			errc <- err
 			return
 		}
@@ -412,14 +414,19 @@ func (p *Peer) handle(msg Msg) error {
 	case msg.Code == discMsg:
 		// This is the last message. We don't need to discard or
 		// check errors because, the connection will be closed after it.
-		return decodeDisconnectMessage(msg.Payload)
+		err := decodeDisconnectMessage(msg.Payload)
+		p.Log().Debug("handle discMsg", "peer", p.ID(), "err", err)
+		return err
 	case msg.Code < baseProtocolLength:
 		// ignore other base protocol messages
-		return msg.Discard()
+		err := msg.Discard()
+		p.Log().Debug("handle base protocol message", "peer", p.ID(), "err", err)
+		return err
 	default:
 		// it's a subprotocol message
 		proto, err := p.getProto(msg.Code)
 		if err != nil {
+			p.Log().Debug("handle subprotocol message", "peer", p.ID(), "err", err)
 			return fmt.Errorf("msg code out of range: %v", msg.Code)
 		}
 		if metrics.Enabled() {
