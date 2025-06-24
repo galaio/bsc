@@ -48,3 +48,6 @@ cmd/bootnode/bootnode
 graphql/__debug_bin
 
 tests/spec-tests/
+
+node_modules/
+package-lock.json

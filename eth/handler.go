@@ -482,6 +482,7 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 	peerInfo := peer.Peer.Info()
 	if !peerInfo.Network.Trusted {
 		if reject || h.peers.len() >= h.maxPeers {
+			peer.Log().Debug("DiscTooManyPeers by reject", "reject", reject, "maxPeers", h.maxPeers, "peers", h.peers.len())
 			return p2p.DiscTooManyPeers
 		}
 	}

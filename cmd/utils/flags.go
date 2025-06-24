@@ -2043,6 +2043,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		godebug.SetGCPercent(int(gogc))
 	}
 
+	log.Info("Cache flag", "cache", ctx.Int(CacheFlag.Name), "gogc", godebug.SetGCPercent(-1))
 	if ctx.IsSet(SyncTargetFlag.Name) {
 		cfg.SyncMode = ethconfig.FullSync // dev sync target forces full sync
 	} else if ctx.IsSet(SyncModeFlag.Name) {
