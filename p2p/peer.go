@@ -246,6 +246,7 @@ func (p *Peer) Disconnect(reason DiscReason) {
 		p.testPipe.Close()
 	}
 
+	p.Log().Debug("Disconnect", "peer", p.ID(), "reason", reason)
 	select {
 	case p.disc <- reason:
 	case <-p.closed:
@@ -310,12 +311,14 @@ loop:
 		case err = <-writeErr:
 			// A write finished. Allow the next write to start if
 			// there was no error.
+			p.Log().Debug("writeErr", "peer", p.ID(), "err", err)
 			if err != nil {
 				reason = DiscNetworkError
 				break loop
 			}
 			writeStart <- struct{}{}
 		case err = <-readErr:
+			p.Log().Debug("readErr", "peer", p.ID(), "err", err)
 			if r, ok := err.(DiscReason); ok {
 				remoteRequested = true
 				reason = r
@@ -324,9 +327,11 @@ loop:
 			}
 			break loop
 		case err = <-p.protoErr:
+			p.Log().Debug("protoErr", "peer", p.ID(), "err", err)
 			reason = discReasonForError(err)
 			break loop
 		case err = <-p.disc:
+			p.Log().Debug("discErr", "peer", p.ID(), "err", err)
 			reason = discReasonForError(err)
 			break loop
 		}
