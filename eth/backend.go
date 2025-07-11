@@ -231,6 +231,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		overrides.OverrideVerkle = config.OverrideVerkle
 	}
 
+	log.AsyncLoggerRoot.Start()
 	// startup ancient freeze
 	freezeDb := chainDb
 	if stack.CheckIfMultiDataBase() {
@@ -845,6 +846,7 @@ func (s *Ethereum) setupDiscovery() error {
 // Stop implements node.Lifecycle, terminating all internal goroutines used by the
 // Ethereum protocol.
 func (s *Ethereum) Stop() error {
+	log.AsyncLoggerRoot.Stop()
 	if s.miner.Mining() {
 		s.miner.TryWaitProposalDoneWhenStopping()
 	}

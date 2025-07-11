@@ -235,6 +235,10 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 		s.db.setError(err)
 		return common.Hash{}
 	}
+	if _, ok := s.db.storageReadStates[s.address]; !ok {
+		s.db.storageReadStates[s.address] = make(map[common.Hash]struct{})
+	}
+	s.db.storageReadStates[s.address][key] = struct{}{}
 	if metrics.EnabledExpensive() {
 		s.db.StorageReads += time.Since(start)
 	}
@@ -435,6 +439,21 @@ func (s *stateObject) commitStorage(op *accountUpdate) {
 			return blob
 		}
 	)
+	s.db.stateStatLock.Lock()
+	for key, val := range s.pendingStorage {
+		if val == s.originStorage[key] {
+			continue
+		}
+		if _, ok := s.db.storageWriteStates[s.address]; !ok {
+			s.db.storageWriteStates[s.address] = make(map[common.Hash]bool)
+		}
+		if val, ok := s.originStorage[key]; !ok || val == (common.Hash{}) {
+			s.db.storageWriteStates[s.address][key] = true
+		} else {
+			s.db.storageWriteStates[s.address][key] = false
+		}
+	}
+	s.db.stateStatLock.Unlock()
 	for key, val := range s.pendingStorage {
 		// Skip the noop storage changes, it might be possible the value
 		// of tracked slot is same in originStorage and pendingStorage
@@ -479,6 +498,13 @@ func (s *stateObject) commit() (*accountUpdate, *trienode.NodeSet, error) {
 	if s.origin != nil {
 		op.origin = types.SlimAccountRLP(*s.origin)
 	}
+	s.db.stateStatLock.Lock()
+	if s.origin == nil {
+		s.db.accountWriteStates[s.address] = true
+	} else {
+		s.db.accountWriteStates[s.address] = false
+	}
+	s.db.stateStatLock.Unlock()
 	// commit the contract code if it's modified
 	if s.dirtyCode {
 		op.code = &contractCode{
