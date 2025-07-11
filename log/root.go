@@ -1,6 +1,10 @@
 package log
 
 import (
+	"bytes"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"sync"
@@ -123,4 +127,104 @@ func Crit(msg string, ctx ...interface{}) {
 // New is a convenient alias for Root().New
 func New(ctx ...interface{}) Logger {
 	return Root().With(ctx...)
+}
+
+// AsyncLogItem is a log item for the async logger
+type AsyncLogItem struct {
+	msg  string
+	args []interface{}
+}
+
+func (l *AsyncLogItem) Format() []byte {
+	sb := bytes.NewBuffer(nil)
+	sb.WriteString(l.msg)
+	sb.WriteString(" ")
+	for i := 0; i < len(l.args); i += 2 {
+		if i+1 >= len(l.args) {
+			break
+		}
+		if i > 0 {
+			sb.WriteString(" ")
+		}
+		switch v := l.args[i+1].(type) {
+		case []byte:
+			sb.WriteString(fmt.Sprintf("%v=%v", l.args[i], hex.EncodeToString(v)))
+		case time.Time:
+			sb.WriteString(fmt.Sprintf("%v=%v", l.args[i], v.Format(time.DateTime)))
+		case string, int, uint64, bool, float64, float32, uint, int8, int16, int32, int64, uint8, uint16, uint32, fmt.Stringer:
+			sb.WriteString(fmt.Sprintf("%v=%v", l.args[i], v))
+		default:
+			enc, err := json.Marshal(v)
+			if err != nil {
+				sb.WriteString(fmt.Sprintf("%v=%v", l.args[i], v))
+			} else {
+				sb.WriteString(fmt.Sprintf("%v=%v", l.args[i], string(enc)))
+			}
+		}
+	}
+	sb.WriteByte('\n')
+	return sb.Bytes()
+}
+
+type AsyncLogger struct {
+	f       *os.File
+	logChan chan []AsyncLogItem
+	stop    chan struct{}
+	buffer  []AsyncLogItem
+}
+
+func NewAsyncLogger(path string) *AsyncLogger {
+	path = fmt.Sprintf("%v_%v", path, time.Now().Format("2006-01-02_15_04"))
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		panic(err)
+	}
+	return &AsyncLogger{
+		f:       f,
+		logChan: make(chan []AsyncLogItem, 10000),
+		stop:    make(chan struct{}),
+		buffer:  make([]AsyncLogItem, 0, 100),
+	}
+}
+
+func (l *AsyncLogger) Write(msg string, ctx []interface{}) {
+	if len(l.buffer) < cap(l.buffer) {
+		l.buffer = append(l.buffer, AsyncLogItem{
+			msg:  msg,
+			args: ctx,
+		})
+		return
+	}
+	l.logChan <- l.buffer
+	l.buffer = make([]AsyncLogItem, 0, 100)
+}
+
+func (l *AsyncLogger) AsyncFlush() {
+	for {
+		select {
+		case items := <-l.logChan:
+			for _, item := range items {
+				l.f.Write(item.Format())
+			}
+			l.f.Sync()
+		case <-l.stop:
+			return
+		}
+	}
+}
+
+func (l *AsyncLogger) Start() {
+	Info("async logger started", "path", l.f.Name())
+	go l.AsyncFlush()
+}
+
+func (l *AsyncLogger) Stop() {
+	Info("async logger started", "path", l.f.Name())
+	close(l.stop)
+}
+
+var AsyncLoggerRoot = NewAsyncLogger("./tracer.log")
+
+func AsyncLog(msg string, ctx ...interface{}) {
+	AsyncLoggerRoot.Write(msg, ctx)
 }

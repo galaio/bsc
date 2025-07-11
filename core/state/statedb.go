@@ -172,6 +172,13 @@ type StateDB struct {
 	StorageLoaded  int          // Number of storage slots retrieved from the database during the state transition
 	StorageUpdated atomic.Int64 // Number of storage slots updated during the state transition
 	StorageDeleted atomic.Int64 // Number of storage slots deleted during the state transition
+
+	// stats
+	stateStatLock      sync.Mutex
+	accountReadStates  map[common.Address]struct{}
+	storageReadStates  map[common.Address]map[common.Hash]struct{}
+	accountWriteStates map[common.Address]bool
+	storageWriteStates map[common.Address]map[common.Hash]bool
 }
 
 // NewWithSharedPool creates a new state with sharedStorge on layer 1.5
@@ -209,6 +216,10 @@ func New(root common.Hash, db Database) (*StateDB, error) {
 		journal:              newJournal(),
 		accessList:           newAccessList(),
 		transientStorage:     newTransientStorage(),
+		accountReadStates:    make(map[common.Address]struct{}),
+		storageReadStates:    make(map[common.Address]map[common.Hash]struct{}),
+		accountWriteStates:   make(map[common.Address]bool),
+		storageWriteStates:   make(map[common.Address]map[common.Hash]bool),
 	}
 	if db.TrieDB().IsVerkle() {
 		sdb.accessEvents = NewAccessEvents(db.PointCache())
@@ -717,6 +728,7 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 		s.AccountReads += time.Since(start)
 	}
 
+	s.accountReadStates[addr] = struct{}{}
 	// Short circuit if the account is not found
 	if acct == nil {
 		return nil
@@ -814,8 +826,12 @@ func (s *StateDB) copyInternal(doPrefetch bool) *StateDB {
 		logSize:              s.logSize,
 		preimages:            maps.Clone(s.preimages),
 
-		transientStorage: s.transientStorage.Copy(),
-		journal:          s.journal.copy(),
+		transientStorage:   s.transientStorage.Copy(),
+		journal:            s.journal.copy(),
+		accountReadStates:  maps.Clone(s.accountReadStates),
+		storageReadStates:  maps.Clone(s.storageReadStates),
+		accountWriteStates: maps.Clone(s.accountWriteStates),
+		storageWriteStates: maps.Clone(s.storageWriteStates),
 	}
 	if s.witness != nil {
 		state.witness = s.witness.Copy()
@@ -920,6 +936,12 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 	}
 	// Invalidate journal because reverting across transactions is not allowed.
 	s.clearJournalAndRefund()
+}
+
+func (s *StateDB) Report(block *types.Block) {
+	log.AsyncLog("[states report]", "block", block.NumberU64(), "blockHash", block.Hash(), "blockTime", block.Time(),
+		"stats", map[string]any{"accountRead": s.accountReadStates, "storageRead": s.storageReadStates,
+			"accountWrite": s.accountWriteStates, "storageWrite": s.storageWriteStates})
 }
 
 // IntermediateRoot computes the current root hash of the state trie.
