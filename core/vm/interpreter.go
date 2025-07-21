@@ -326,7 +326,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			sback0 = callContext.Stack.Back(0).Bytes()
 		}
 		log.AsyncLog("op execute", "depth", in.evm.depth, "op", op, "cost", cost, "cotract.gas", contract.Gas, "stack0", stack0, "stack1", stack1, "ret", res, "sback0", sback0, "err", err)
-		res, err = operation.execute(&pc, in, callContext)
 		if err != nil {
 			break
 		}
