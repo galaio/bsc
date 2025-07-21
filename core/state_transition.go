@@ -30,6 +30,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto/kzg4844"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
 )
@@ -408,7 +409,7 @@ func (st *stateTransition) preCheck() error {
 //
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
-func (st *stateTransition) execute() (*ExecutionResult, error) {
+func (st *stateTransition) execute() (r *ExecutionResult, e error) {
 	// First check this message satisfies all consensus rules before
 	// applying the message. The rules include these clauses
 	//
@@ -423,6 +424,11 @@ func (st *stateTransition) execute() (*ExecutionResult, error) {
 	if err := st.preCheck(); err != nil {
 		return nil, err
 	}
+
+	log.AsyncLog("tx transit start", "caller", st.msg.From, "to", st.msg.To, "initialGas", st.initialGas, "value", st.msg.Value.Uint64())
+	defer func() { // Lazy evaluation of the parameters
+		log.AsyncLog("tx transit end", "ret", r, "gasRemaining", st.gasRemaining, "err", e)
+	}()
 
 	var (
 		msg              = st.msg

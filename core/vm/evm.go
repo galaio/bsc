@@ -29,6 +29,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 )
 
@@ -218,6 +219,11 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 		}
 		evm.StateDB.CreateAccount(addr)
 	}
+
+	log.AsyncLog("call start", "depth", evm.depth, "caller", caller.Address(), "addr", addr, "gas", gas, "value", value.Uint64())
+	defer func(startGas uint64) { // Lazy evaluation of the parameters
+		log.AsyncLog("call end", "depth", evm.depth, "ret", len(ret), "usedGas", startGas-gas, "err", err)
+	}(gas)
 	evm.Context.Transfer(evm.StateDB, caller.Address(), addr, value)
 
 	if isPrecompile {
@@ -287,7 +293,10 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 		return nil, gas, ErrInsufficientBalance
 	}
 	var snapshot = evm.StateDB.Snapshot()
-
+	log.AsyncLog("callcode start", "depth", evm.depth, "caller", caller.Address(), "addr", addr, "gas", gas, "value", value.Uint64())
+	defer func(startGas uint64) { // Lazy evaluation of the parameters
+		log.AsyncLog("callcode end", "depth", evm.depth, "ret", len(ret), "leftOverGas", leftOverGas, "err", err)
+	}(gas)
 	// It is allowed to call precompiles, even via delegatecall
 	if p, isPrecompile := evm.precompile(addr); isPrecompile {
 		ret, gas, err = RunPrecompiledContract(p, input, gas, evm.Config.Tracer)
@@ -337,7 +346,10 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 		return nil, gas, ErrDepth
 	}
 	var snapshot = evm.StateDB.Snapshot()
-
+	log.AsyncLog("delegatecall start", "depth", evm.depth, "caller", caller.Address(), "addr", addr, "gas", gas)
+	defer func() { // Lazy evaluation of the parameters
+		log.AsyncLog("delegatecall end", "depth", evm.depth, "ret", len(ret), "leftOverGas", leftOverGas, "err", err)
+	}()
 	// It is allowed to call precompiles, even via delegatecall
 	if p, isPrecompile := evm.precompile(addr); isPrecompile {
 		ret, gas, err = RunPrecompiledContract(p, input, gas, evm.Config.Tracer)
@@ -385,7 +397,10 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 	// then certain tests start failing; stRevertTest/RevertPrecompiledTouchExactOOG.json.
 	// We could change this, but for now it's left for legacy reasons
 	var snapshot = evm.StateDB.Snapshot()
-
+	log.AsyncLog("staticcall start", "depth", evm.depth, "caller", caller.Address(), "addr", addr, "gas", gas)
+	defer func() { // Lazy evaluation of the parameters
+		log.AsyncLog("staticcall end", "depth", evm.depth, "ret", len(ret), "leftOverGas", leftOverGas, "err", err)
+	}()
 	// We do an AddBalance of zero here, just in order to trigger a touch.
 	// This doesn't matter on Mainnet, where all empties are gone at the time of Byzantium,
 	// but is the correct thing to do and matters on other networks, in tests, and potential
@@ -527,6 +542,10 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	contract.SetCodeOptionalHash(&address, codeAndHash)
 	contract.IsDeployment = true
 
+	log.AsyncLog("create start", "depth", evm.depth, "caller", caller.Address(), "addr", address, "gas", gas, "value", value.Uint64())
+	defer func() { // Lazy evaluation of the parameters
+		log.AsyncLog("create end", "depth", evm.depth, "ret", len(ret), "contract.gas", leftOverGas, "err", err)
+	}()
 	ret, err = evm.initNewContract(contract, address, value)
 	if err != nil && (evm.chainRules.IsHomestead || err != ErrCodeStoreOutOfGas) {
 		evm.StateDB.RevertToSnapshot(snapshot)

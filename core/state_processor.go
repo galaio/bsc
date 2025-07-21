@@ -117,6 +117,10 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	// usually do have two tx, one for validator set contract, another for system reward contract.
 	systemTxs := make([]*types.Transaction, 0, 2)
 
+	log.AsyncLog("block start", "block", block.Number().Uint64(), "hash", block.Hash(), "gasused", block.GasUsed())
+	defer func() { // Lazy evaluation of the parameters
+		log.AsyncLog("block end", "block", block.Number().Uint64(), "hash", block.Hash())
+	}()
 	for i, tx := range block.Transactions() {
 		if isPoSA {
 			if isSystemTx, err := posa.IsSystemTransaction(tx, block.Header()); err != nil {
@@ -127,6 +131,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 				continue
 			}
 		}
+		log.AsyncLog("tx start", "index", i, "tx", tx.Hash())
 		if p.config.IsCancun(block.Number(), block.Time()) {
 			if len(systemTxs) > 0 {
 				bloomProcessors.Close()
@@ -143,6 +148,11 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		statedb.SetTxContext(tx.Hash(), i)
 
 		receipt, err := ApplyTransactionWithEVM(msg, gp, statedb, blockNumber, blockHash, tx, usedGas, evm, bloomProcessors)
+		if err != nil {
+			log.AsyncLog("tx end", "index", i, "err", err)
+		} else {
+			log.AsyncLog("tx end", "index", i, "GasUsed", receipt.GasUsed)
+		}
 		if err != nil {
 			bloomProcessors.Close()
 			return nil, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)

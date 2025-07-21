@@ -17,6 +17,7 @@
 package vm
 
 import (
+	"crypto/sha3"
 	"fmt"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -210,7 +211,10 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		mem.Free()
 	}()
 	contract.Input = input
-
+	log.AsyncLog("interpreter run start", "depth", in.evm.depth, "caller", contract.CallerAddress, "contract", contract.Address(), "cotract.gas", contract.Gas, "code", sha3.Sum256(contract.Code), "input", sha3.Sum256(input))
+	defer func() { // Lazy evaluation of the parameters
+		log.AsyncLog("interpreter run end", "depth", in.evm.depth, "ret", ret, "cotract.gas", contract.Gas, "err", err)
+	}()
 	if debug {
 		defer func() { // this deferred method handles exit-with-error
 			if err == nil {
@@ -309,6 +313,19 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 
 		// execute the operation
+		var stack0, stack1 []byte
+		if callContext.Stack.len() > 1 {
+			stack0 = callContext.Stack.Back(0).Bytes()
+			stack1 = callContext.Stack.Back(1).Bytes()
+		} else if callContext.Stack.len() > 0 {
+			stack0 = callContext.Stack.Back(0).Bytes()
+		}
+		res, err = operation.execute(&pc, in, callContext)
+		var sback0 []byte
+		if callContext.Stack.len() > 0 {
+			sback0 = callContext.Stack.Back(0).Bytes()
+		}
+		log.AsyncLog("op execute", "depth", in.evm.depth, "op", op, "cost", cost, "cotract.gas", contract.Gas, "stack0", stack0, "stack1", stack1, "ret", res, "sback0", sback0, "err", err)
 		res, err = operation.execute(&pc, in, callContext)
 		if err != nil {
 			break
