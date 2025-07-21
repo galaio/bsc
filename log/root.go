@@ -135,6 +135,20 @@ type AsyncLogItem struct {
 	args []interface{}
 }
 
+func defaultFormat(sb *bytes.Buffer, key interface{}, value interface{}) {
+	defer func() {
+		if r := recover(); r != nil {
+			sb.WriteString(fmt.Sprintf("%v=%v", key, value))
+		}
+	}()
+	enc, err := json.Marshal(value)
+	if err != nil {
+		sb.WriteString(fmt.Sprintf("%v=%v", key, value))
+	} else {
+		sb.WriteString(fmt.Sprintf("%v=%v", key, string(enc)))
+	}
+}
+
 func (l *AsyncLogItem) Format() []byte {
 	sb := bytes.NewBuffer(nil)
 	sb.WriteString(l.msg)
@@ -154,12 +168,7 @@ func (l *AsyncLogItem) Format() []byte {
 		case string, int, uint64, bool, float64, float32, uint, int8, int16, int32, int64, uint8, uint16, uint32, fmt.Stringer:
 			sb.WriteString(fmt.Sprintf("%v=%v", l.args[i], v))
 		default:
-			enc, err := json.Marshal(v)
-			if err != nil {
-				sb.WriteString(fmt.Sprintf("%v=%v", l.args[i], v))
-			} else {
-				sb.WriteString(fmt.Sprintf("%v=%v", l.args[i], string(enc)))
-			}
+			defaultFormat(sb, l.args[i], v)
 		}
 	}
 	sb.WriteByte('\n')
