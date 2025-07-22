@@ -2201,7 +2201,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 			// only block being inserted. A bit crude, but witnesses are huge,
 			// so we refuse to make an entire chain of them.
 			if bc.vmConfig.StatelessSelfValidation || (makeWitness && len(chain) == 1) {
-				witness, err = stateless.NewWitness(block.Header(), bc)
+				witness, err = stateless.NewWitness(block.Header(), bc, bc.GenesisHeader())
 				if err != nil {
 					return nil, it.index, err
 				}

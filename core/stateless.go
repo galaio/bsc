@@ -58,12 +58,13 @@ func ExecuteStateless(config *params.ChainConfig, vmconfig vm.Config, block *typ
 	}
 	// Create a blockchain that is idle, but can be used to access headers through
 	chain := &HeaderChain{
-		config:      config,
-		chainDb:     memdb,
-		headerCache: lru.NewCache[common.Hash, *types.Header](256),
-		tdCache:     lru.NewCache[common.Hash, *big.Int](256),
-		numberCache: lru.NewCache[common.Hash, uint64](256),
-		engine:      engine,
+		config:        config,
+		chainDb:       memdb,
+		headerCache:   lru.NewCache[common.Hash, *types.Header](256),
+		tdCache:       lru.NewCache[common.Hash, *big.Int](256),
+		numberCache:   lru.NewCache[common.Hash, uint64](256),
+		engine:        engine,
+		genesisHeader: witness.GenesisHeader(),
 	}
 	processor := NewStateProcessor(config, chain)
 	validator := NewBlockValidator(config, nil) // No chain, we only validate the state, not the block

@@ -696,7 +696,7 @@ func (w *worker) makeEnv(parent *types.Header, header *types.Header, coinbase co
 		return nil, err
 	}
 	if witness {
-		bundle, err := stateless.NewWitness(header, w.chain)
+		bundle, err := stateless.NewWitness(header, w.chain, w.chain.GenesisHeader())
 		if err != nil {
 			return nil, err
 		}

@@ -44,7 +44,9 @@ type Witness struct {
 	State   map[string]struct{} // Set of MPT state trie nodes (account and storage together)
 
 	chain HeaderReader // Chain reader to convert block hash ops to header proofs
-	lock  sync.Mutex   // Lock to allow concurrent state insertions
+
+	genesisHeader *types.Header // Genesis header
+	lock          sync.Mutex    // Lock to allow concurrent state insertions
 }
 
 func (w *Witness) HeaderSize() int {
@@ -94,7 +96,7 @@ func (w *Witness) Stats() string {
 }
 
 // NewWitness creates an empty witness ready for population.
-func NewWitness(context *types.Header, chain HeaderReader) (*Witness, error) {
+func NewWitness(context *types.Header, chain HeaderReader, genesisHeader *types.Header) (*Witness, error) {
 	// When building witnesses, retrieve the parent header, which will *always*
 	// be included to act as a trustless pre-root hash container
 	var headers []*types.Header
@@ -107,11 +109,12 @@ func NewWitness(context *types.Header, chain HeaderReader) (*Witness, error) {
 	}
 	// Create the wtness with a reconstructed gutted out block
 	return &Witness{
-		context: context,
-		Headers: headers,
-		Codes:   make(map[string]struct{}),
-		State:   make(map[string]struct{}),
-		chain:   chain,
+		context:       context,
+		Headers:       headers,
+		Codes:         make(map[string]struct{}),
+		State:         make(map[string]struct{}),
+		chain:         chain,
+		genesisHeader: genesisHeader,
 	}, nil
 }
 
@@ -166,4 +169,8 @@ func (w *Witness) Copy() *Witness {
 // sanitize it and fail before that).
 func (w *Witness) Root() common.Hash {
 	return w.Headers[0].Root
+}
+
+func (w *Witness) GenesisHeader() *types.Header {
+	return w.genesisHeader
 }
