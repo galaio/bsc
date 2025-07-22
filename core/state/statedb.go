@@ -18,6 +18,7 @@
 package state
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -942,6 +943,40 @@ func (s *StateDB) Report(block *types.Block) {
 	log.AsyncLog("[states report]", "block", block.NumberU64(), "blockHash", block.Hash(), "blockTime", block.Time(),
 		"stats", map[string]any{"accountRead": s.accountReadStates, "storageRead": s.storageReadStates,
 			"accountWrite": s.accountWriteStates, "storageWrite": s.storageWriteStates})
+}
+
+func (s *StateDB) Stats() string {
+	var stats struct {
+		AccountRead   int
+		StorageRead   int
+		AccountCreate int
+		StorageCreate int
+		AccountUpdate int
+		StorageUpdate int
+	}
+	stats.AccountRead = len(s.accountReadStates)
+	stats.StorageRead = len(s.storageReadStates)
+	for _, create := range s.accountWriteStates {
+		if create {
+			stats.AccountCreate++
+		} else {
+			stats.AccountUpdate++
+		}
+	}
+	for _, keys := range s.storageWriteStates {
+		for _, create := range keys {
+			if create {
+				stats.StorageCreate++
+			} else {
+				stats.StorageUpdate++
+			}
+		}
+	}
+	json, err := json.Marshal(stats)
+	if err != nil {
+		return ""
+	}
+	return string(json)
 }
 
 // IntermediateRoot computes the current root hash of the state trie.

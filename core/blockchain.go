@@ -2391,7 +2391,7 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 		if crossReceiptRoot != block.ReceiptHash() {
 			return nil, fmt.Errorf("stateless self-validation receipt root mismatch (cross: %x local: %x)", crossReceiptRoot, block.ReceiptHash())
 		}
-		log.Warn("stateless self-validation success", "block", block.Number(), "hash", block.Hash(), "blockSize", block.Size(), "txs", len(block.Transactions()), "gas", block.GasUsed(), "witness", witness.Stats())
+		log.Info("stateless self-validation success", "block", block.Number(), "hash", block.Hash(), "blockSize", block.Size(), "txs", len(block.Transactions()), "gas", block.GasUsed(), "witness", witness.Stats(), "access", statedb.Stats())
 	}
 	xvtime := time.Since(xvstart)
 	proctime := time.Since(start) // processing + validation + cross validation
