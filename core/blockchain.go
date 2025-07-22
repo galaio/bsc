@@ -343,6 +343,9 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		log.Warn("TriesInMemory isn't the default value (128), you need specify the same TriesInMemory when pruning data",
 			"triesInMemory", cacheConfig.TriesInMemory, "scheme", cacheConfig.StateScheme)
 	}
+	if vmConfig.StatelessSelfValidation {
+		log.Info("Stateless self-validation is enabled")
+	}
 
 	// Open trie database with provided config
 	enableVerkle, err := EnableVerkleAtGenesis(db, genesis)
@@ -2204,6 +2207,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 				}
 			}
 			statedb.StartPrefetcher("chain", witness)
+			log.Info("Generating witness", "block", block.Number(), "hash", block.Hash(), "witness", statedb.Witness() == nil, "StatelessSelfValidation", bc.vmConfig.StatelessSelfValidation)
 		}
 
 		interruptCh := make(chan struct{})
@@ -2363,6 +2367,7 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 	// a tight integration to enable running *all* consensus tests through the
 	// witness builder/runner, which would otherwise be impossible due to the
 	// various invalid chain states/behaviors being contained in those tests.
+	log.Warn("try running stateless self-validation", "block", block.Number(), "hash", block.Hash(), "witness", statedb.Witness() == nil, "statelessSelfValidation", bc.vmConfig.StatelessSelfValidation)
 	xvstart := time.Now()
 	if witness := statedb.Witness(); witness != nil && bc.vmConfig.StatelessSelfValidation {
 		log.Warn("Running stateless self-validation", "block", block.Number(), "hash", block.Hash())
@@ -2385,6 +2390,7 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 		if crossReceiptRoot != block.ReceiptHash() {
 			return nil, fmt.Errorf("stateless self-validation receipt root mismatch (cross: %x local: %x)", crossReceiptRoot, block.ReceiptHash())
 		}
+		log.Warn("stateless self-validation success", "block", block.Number(), "hash", block.Hash(), "blockSize", block.Size(), "txs", len(block.Transactions()), "gas", block.GasUsed(), "witness", witness.Stats())
 	}
 	xvtime := time.Since(xvstart)
 	proctime := time.Since(start) // processing + validation + cross validation

@@ -17,6 +17,7 @@
 package stateless
 
 import (
+	"encoding/json"
 	"errors"
 	"maps"
 	"slices"
@@ -44,6 +45,52 @@ type Witness struct {
 
 	chain HeaderReader // Chain reader to convert block hash ops to header proofs
 	lock  sync.Mutex   // Lock to allow concurrent state insertions
+}
+
+func (w *Witness) HeaderSize() int {
+	size := 0
+	for _, header := range w.Headers {
+		size += int(header.Size())
+	}
+	return size
+}
+
+func (w *Witness) CodeSize() int {
+	size := 0
+	for code := range w.Codes {
+		size += len(code)
+	}
+	return size
+}
+
+func (w *Witness) StateSize() int {
+	size := 0
+	for state := range w.State {
+		size += len(state)
+	}
+	return size
+}
+
+func (w *Witness) Stats() string {
+	var stats struct {
+		HeaderCount int
+		HeaderSize  int
+		CodeCount   int
+		CodeSize    int
+		StateCount  int
+		StateSize   int
+	}
+	stats.HeaderCount = len(w.Headers)
+	stats.HeaderSize = w.HeaderSize()
+	stats.CodeCount = len(w.Codes)
+	stats.CodeSize = w.CodeSize()
+	stats.StateCount = len(w.State)
+	stats.StateSize = w.StateSize()
+	json, err := json.Marshal(stats)
+	if err != nil {
+		return ""
+	}
+	return string(json)
 }
 
 // NewWitness creates an empty witness ready for population.
