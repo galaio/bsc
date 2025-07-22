@@ -17,7 +17,10 @@
 package core
 
 import (
+	"math/big"
+
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/lru"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/stateless"
@@ -54,15 +57,13 @@ func ExecuteStateless(config *params.ChainConfig, vmconfig vm.Config, block *typ
 		return common.Hash{}, common.Hash{}, err
 	}
 	// Create a blockchain that is idle, but can be used to access headers through
-	// chain := &HeaderChain{
-	// 	config:      config,
-	// 	chainDb:     memdb,
-	// 	headerCache: lru.NewCache[common.Hash, *types.Header](256),
-	// 	engine:      beacon.New(ethash.NewFaker()),
-	// }
-	chain, err := NewHeaderChain(memdb, config, engine, nil)
-	if err != nil {
-		return common.Hash{}, common.Hash{}, err
+	chain := &HeaderChain{
+		config:      config,
+		chainDb:     memdb,
+		headerCache: lru.NewCache[common.Hash, *types.Header](256),
+		tdCache:     lru.NewCache[common.Hash, *big.Int](256),
+		numberCache: lru.NewCache[common.Hash, uint64](256),
+		engine:      engine,
 	}
 	processor := NewStateProcessor(config, chain)
 	validator := NewBlockValidator(config, nil) // No chain, we only validate the state, not the block

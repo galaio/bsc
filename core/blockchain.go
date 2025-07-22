@@ -2370,6 +2370,9 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 	// various invalid chain states/behaviors being contained in those tests.
 	xvstart := time.Now()
 	if witness := statedb.Witness(); witness != nil && bc.vmConfig.StatelessSelfValidation {
+		// TODO: add genesis header to witness
+		genesisHeader := bc.GetHeaderByNumber(0)
+		witness.Headers = append(witness.Headers, genesisHeader)
 		log.Warn("Running stateless self-validation", "block", block.Number(), "hash", block.Hash(), "blockSize", block.Size(), "txs", len(block.Transactions()), "gas", block.GasUsed(), "witness", witness.Stats())
 
 		// Remove critical computed fields from the block to force true recalculation
