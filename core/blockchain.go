@@ -2368,10 +2368,9 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 	// a tight integration to enable running *all* consensus tests through the
 	// witness builder/runner, which would otherwise be impossible due to the
 	// various invalid chain states/behaviors being contained in those tests.
-	log.Warn("try running stateless self-validation", "block", block.Number(), "hash", block.Hash(), "witness", statedb.Witness() == nil, "statelessSelfValidation", bc.vmConfig.StatelessSelfValidation)
 	xvstart := time.Now()
 	if witness := statedb.Witness(); witness != nil && bc.vmConfig.StatelessSelfValidation {
-		log.Warn("Running stateless self-validation", "block", block.Number(), "hash", block.Hash())
+		log.Warn("Running stateless self-validation", "block", block.Number(), "hash", block.Hash(), "blockSize", block.Size(), "txs", len(block.Transactions()), "gas", block.GasUsed(), "witness", witness.Stats(), "access", statedb.Stats())
 
 		// Remove critical computed fields from the block to force true recalculation
 		context := block.Header()
@@ -2381,7 +2380,7 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 		task := types.NewBlockWithHeader(context).WithBody(*block.Body())
 
 		// Run the stateless self-cross-validation
-		crossStateRoot, crossReceiptRoot, err := ExecuteStateless(bc.chainConfig, bc.vmConfig, task, witness)
+		crossStateRoot, crossReceiptRoot, err := ExecuteStateless(bc.chainConfig, bc.vmConfig, task, witness, bc.engine)
 		if err != nil {
 			return nil, fmt.Errorf("stateless self-validation failed: %v", err)
 		}
