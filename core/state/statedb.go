@@ -956,7 +956,9 @@ func (s *StateDB) Stats() string {
 		StorageUpdate int
 	}
 	stats.AccountRead = len(s.accountReadStates)
-	stats.StorageRead = len(s.storageReadStates)
+	for _, keys := range s.storageReadStates {
+		stats.StorageRead += len(keys)
+	}
 	for _, create := range s.accountWriteStates {
 		if create {
 			stats.AccountCreate++
