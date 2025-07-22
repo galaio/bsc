@@ -2370,7 +2370,7 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 	// various invalid chain states/behaviors being contained in those tests.
 	xvstart := time.Now()
 	if witness := statedb.Witness(); witness != nil && bc.vmConfig.StatelessSelfValidation {
-		log.Warn("Running stateless self-validation", "block", block.Number(), "hash", block.Hash(), "blockSize", block.Size(), "txs", len(block.Transactions()), "gas", block.GasUsed(), "witness", witness.Stats(), "access", statedb.Stats())
+		log.Warn("Running stateless self-validation", "block", block.Number(), "hash", block.Hash(), "blockSize", block.Size(), "txs", len(block.Transactions()), "gas", block.GasUsed(), "witness", witness.Stats())
 
 		// Remove critical computed fields from the block to force true recalculation
 		context := block.Header()
@@ -2390,7 +2390,7 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 		if crossReceiptRoot != block.ReceiptHash() {
 			return nil, fmt.Errorf("stateless self-validation receipt root mismatch (cross: %x local: %x)", crossReceiptRoot, block.ReceiptHash())
 		}
-		log.Info("stateless self-validation success", "block", block.Number(), "hash", block.Hash(), "blockSize", block.Size(), "txs", len(block.Transactions()), "gas", block.GasUsed(), "witness", witness.Stats(), "access", statedb.Stats())
+		log.Info("stateless self-validation success", "block", block.Number(), "hash", block.Hash())
 	}
 	xvtime := time.Since(xvstart)
 	proctime := time.Since(start) // processing + validation + cross validation
@@ -2429,6 +2429,7 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 	if err != nil {
 		return nil, err
 	}
+	log.Info("access states", "block", block.Number(), "hash", block.Hash(), "blockSize", block.Size(), "txs", len(block.Transactions()), "gas", block.GasUsed(), "access", statedb.Stats())
 	// Update the metrics touched during block commit
 	if metrics.EnabledExpensive() {
 		accountCommitTimer.Update(statedb.AccountCommits)   // Account commits are complete, we can mark them
