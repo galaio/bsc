@@ -26,6 +26,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/stateless"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/trie"
@@ -41,7 +42,7 @@ import (
 //   - It cannot be placed outside of core, because it needs to construct a dud headerchain
 //
 // TODO(karalabe): Would be nice to resolve both issues above somehow and move it.
-func ExecuteStateless(config *params.ChainConfig, vmconfig vm.Config, block *types.Block, witness *stateless.Witness, engine consensus.Engine) (common.Hash, common.Hash, error) {
+func ExecuteStateless(config *params.ChainConfig, vmconfig vm.Config, block *types.Block, witness *stateless.Witness, engine consensus.Engine, chainDb ethdb.Database) (common.Hash, common.Hash, error) {
 	// Sanity check if the supplied block accidentally contains a set root or
 	// receipt hash. If so, be very loud, but still continue.
 	if block.Root() != (common.Hash{}) {
@@ -65,6 +66,10 @@ func ExecuteStateless(config *params.ChainConfig, vmconfig vm.Config, block *typ
 		numberCache:   lru.NewCache[common.Hash, uint64](256),
 		engine:        engine,
 		genesisHeader: witness.GenesisHeader(),
+	}
+	// TODO: because parlia need historical headers, we need to use original chaindb
+	if chainDb != nil {
+		chain.chainDb = chainDb
 	}
 	processor := NewStateProcessor(config, chain)
 	validator := NewBlockValidator(config, nil) // No chain, we only validate the state, not the block

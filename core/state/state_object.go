@@ -211,6 +211,11 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 		return value
 	}
 
+	if _, ok := s.db.storageReadStates[s.address]; !ok {
+		s.db.storageReadStates[s.address] = make(map[common.Hash]struct{})
+	}
+	s.db.storageReadStates[s.address][key] = struct{}{}
+
 	if s.db.needBadSharedStorage {
 		// keep compatible with old erroneous data(https://forum.bnbchain.org/t/about-the-hertzfix/2400).
 		if value, cached := s.tryGetFromSharedPool(key); cached {
@@ -246,10 +251,6 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 		s.db.setError(err)
 		return common.Hash{}
 	}
-	if _, ok := s.db.storageReadStates[s.address]; !ok {
-		s.db.storageReadStates[s.address] = make(map[common.Hash]struct{})
-	}
-	s.db.storageReadStates[s.address][key] = struct{}{}
 	if metrics.EnabledExpensive() {
 		s.db.StorageReads += time.Since(start)
 	}

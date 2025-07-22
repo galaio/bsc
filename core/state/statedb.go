@@ -719,6 +719,7 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 	}
 	s.AccountLoaded++
 
+	s.accountReadStates[addr] = struct{}{}
 	start := time.Now()
 	acct, err := s.reader.Account(addr)
 	if err != nil {
@@ -729,7 +730,6 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 		s.AccountReads += time.Since(start)
 	}
 
-	s.accountReadStates[addr] = struct{}{}
 	// Short circuit if the account is not found
 	if acct == nil {
 		return nil

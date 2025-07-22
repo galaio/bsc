@@ -25,6 +25,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/rlp"
 )
 
 // HeaderReader is an interface to pull in headers in place of block hashes for
@@ -93,6 +94,19 @@ func (w *Witness) Stats() string {
 		return ""
 	}
 	return string(json)
+}
+
+type writeCounter uint64
+
+func (c *writeCounter) Write(b []byte) (int, error) {
+	*c += writeCounter(len(b))
+	return len(b), nil
+}
+
+func (w *Witness) Size() int {
+	c := writeCounter(0)
+	rlp.Encode(&c, w)
+	return int(c)
 }
 
 // NewWitness creates an empty witness ready for population.

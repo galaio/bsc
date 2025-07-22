@@ -2373,7 +2373,7 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 		// TODO: add genesis header to witness
 		genesisHeader := bc.GetHeaderByNumber(0)
 		witness.Headers = append(witness.Headers, genesisHeader)
-		log.Warn("Running stateless self-validation", "block", block.Number(), "hash", block.Hash(), "blockSize", block.Size(), "txs", len(block.Transactions()), "gas", block.GasUsed(), "witness", witness.Stats())
+		log.Warn("Running stateless self-validation", "block", block.Number(), "hash", block.Hash(), "blockSize", block.Size(), "txs", len(block.Transactions()), "gas", block.GasUsed(), "witness", witness.Stats(), "witnessSize", witness.Size())
 
 		// Remove critical computed fields from the block to force true recalculation
 		context := block.Header()
@@ -2383,7 +2383,7 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 		task := types.NewBlockWithHeader(context).WithBody(*block.Body())
 
 		// Run the stateless self-cross-validation
-		crossStateRoot, crossReceiptRoot, err := ExecuteStateless(bc.chainConfig, bc.vmConfig, task, witness, bc.engine)
+		crossStateRoot, crossReceiptRoot, err := ExecuteStateless(bc.chainConfig, bc.vmConfig, task, witness, bc.engine, bc.db)
 		if err != nil {
 			return nil, fmt.Errorf("stateless self-validation failed: %v", err)
 		}
