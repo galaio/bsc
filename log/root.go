@@ -160,16 +160,11 @@ func (l *AsyncLogItem) Format() []byte {
 		if i > 0 {
 			sb.WriteString(" ")
 		}
-		switch v := l.args[i+1].(type) {
-		case []byte:
-			sb.WriteString(fmt.Sprintf("%v=%v", l.args[i], hex.EncodeToString(v)))
-		case time.Time:
-			sb.WriteString(fmt.Sprintf("%v=%v", l.args[i], v.Format(time.DateTime)))
-		case string, int, uint64, bool, float64, float32, uint, int8, int16, int32, int64, uint8, uint16, uint32, fmt.Stringer:
-			sb.WriteString(fmt.Sprintf("%v=%v", l.args[i], v))
-		default:
-			defaultFormat(sb, l.args[i], v)
+		if b, ok := (l.args[i+1]).([]byte); ok {
+			sb.WriteString(fmt.Sprintf("%v=%v", l.args[i], hex.EncodeToString(b)))
+			continue
 		}
+		sb.WriteString(fmt.Sprintf("%v=%v", l.args[i], l.args[i+1]))
 	}
 	sb.WriteByte('\n')
 	return sb.Bytes()
