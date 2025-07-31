@@ -229,6 +229,7 @@ func (l *AsyncLogger) AsyncFlush() {
 			}
 			l.f.Sync()
 		case <-l.stop:
+			Info("async logger loop exited", "path", l.f.Name())
 			return
 		}
 	}
@@ -240,7 +241,7 @@ func (l *AsyncLogger) Start() {
 }
 
 func (l *AsyncLogger) Stop() {
-	Info("async logger started", "path", l.f.Name())
+	Info("async logger stopped", "path", l.f.Name())
 	close(l.stop)
 }
 
