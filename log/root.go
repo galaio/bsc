@@ -1,15 +1,15 @@
 package log
 
 import (
-	"bytes"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"reflect"
 	"sync"
 	"time"
+	"unsafe"
 )
 
 var (
@@ -136,43 +136,34 @@ type AsyncLogItem struct {
 	args []interface{}
 }
 
-func defaultFormat(sb *bytes.Buffer, key interface{}, value interface{}) {
-	defer func() {
-		if r := recover(); r != nil {
-			sb.WriteString(fmt.Sprintf("%v=%v", key, value))
-		}
-	}()
-	enc, err := json.Marshal(value)
-	if err != nil {
-		sb.WriteString(fmt.Sprintf("%v=%v", key, value))
-	} else {
-		sb.WriteString(fmt.Sprintf("%v=%v", key, string(enc)))
-	}
-}
-
-func (l *AsyncLogItem) Format() []byte {
-	sb := bytes.NewBuffer(nil)
-	sb.WriteString(l.msg)
-	sb.WriteString(" ")
+func (l *AsyncLogItem) Format(w io.Writer) {
+	w.Write(StringToBytes(l.msg))
+	w.Write([]byte{' '})
 	for i := 0; i < len(l.args); i += 2 {
 		if i+1 >= len(l.args) {
 			break
 		}
 		if i > 0 {
-			sb.WriteString(" ")
+			w.Write([]byte{' '})
 		}
 		if b, ok := (l.args[i+1]).([]byte); ok {
-			sb.WriteString(fmt.Sprintf("%v=%v", l.args[i], hex.EncodeToString(b)))
+			fmt.Fprintf(w, "%v=%v", l.args[i], hex.EncodeToString(b))
 			continue
 		}
 		if IsInterfaceNil(l.args[i+1]) {
-			sb.WriteString(fmt.Sprintf("%v=%v", l.args[i], "nil"))
+			fmt.Fprintf(w, "%v=%v", l.args[i], "nil")
 			continue
 		}
-		sb.WriteString(fmt.Sprintf("%v=%v", l.args[i], l.args[i+1]))
+		fmt.Fprintf(w, "%v=%v", l.args[i], l.args[i+1])
 	}
-	sb.WriteByte('\n')
-	return sb.Bytes()
+}
+func StringToBytes(s string) []byte {
+	return *(*[]byte)(unsafe.Pointer(
+		&struct {
+			string
+			Cap int
+		}{s, len(s)},
+	))
 }
 
 func IsInterfaceNil(i interface{}) bool {
@@ -208,6 +199,12 @@ func NewAsyncLogger(path string) *AsyncLogger {
 	}
 }
 
+var LogItemsPool = sync.Pool{
+	New: func() interface{} {
+		return make([]AsyncLogItem, 0, 10000)
+	},
+}
+
 func (l *AsyncLogger) Write(msg string, ctx []interface{}) {
 	if len(l.buffer) < cap(l.buffer) {
 		l.buffer = append(l.buffer, AsyncLogItem{
@@ -217,7 +214,8 @@ func (l *AsyncLogger) Write(msg string, ctx []interface{}) {
 		return
 	}
 	l.logChan <- l.buffer
-	l.buffer = make([]AsyncLogItem, 0, 100)
+	l.buffer = LogItemsPool.Get().([]AsyncLogItem)
+	l.buffer = l.buffer[:0]
 }
 
 func (l *AsyncLogger) AsyncFlush() {
@@ -225,9 +223,10 @@ func (l *AsyncLogger) AsyncFlush() {
 		select {
 		case items := <-l.logChan:
 			for _, item := range items {
-				l.f.Write(item.Format())
+				item.Format(l.f)
 			}
 			l.f.Sync()
+			LogItemsPool.Put(items)
 		case <-l.stop:
 			Info("async logger loop exited", "path", l.f.Name())
 			return
