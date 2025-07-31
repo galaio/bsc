@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"reflect"
 	"sync"
 	"time"
 )
@@ -164,10 +165,26 @@ func (l *AsyncLogItem) Format() []byte {
 			sb.WriteString(fmt.Sprintf("%v=%v", l.args[i], hex.EncodeToString(b)))
 			continue
 		}
+		if IsInterfaceNil(l.args[i+1]) {
+			sb.WriteString(fmt.Sprintf("%v=%v", l.args[i], "nil"))
+			continue
+		}
 		sb.WriteString(fmt.Sprintf("%v=%v", l.args[i], l.args[i+1]))
 	}
 	sb.WriteByte('\n')
 	return sb.Bytes()
+}
+
+func IsInterfaceNil(i interface{}) bool {
+	if i == nil {
+		return true
+	}
+	v := reflect.ValueOf(i)
+	switch v.Kind() {
+	case reflect.Ptr, reflect.Slice, reflect.Map, reflect.Chan, reflect.Func:
+		return v.IsNil()
+	}
+	return false
 }
 
 type AsyncLogger struct {
