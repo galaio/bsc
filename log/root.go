@@ -185,7 +185,7 @@ func IsInterfaceNil(i interface{}) bool {
 }
 
 const (
-	ItemSize        = 100000
+	ItemSize        = 10000
 	MaxLogBytesSize = 1024 * 1024 * 20
 )
 
@@ -215,11 +215,6 @@ var LogItemsPool = sync.Pool{
 		return make([]AsyncLogItem, 0, ItemSize)
 	},
 }
-var BufferPool = sync.Pool{
-	New: func() interface{} {
-		return make([]byte, 0, MaxLogBytesSize)
-	},
-}
 
 func (l *AsyncLogger) Write(msg string, ctx []interface{}) {
 	if len(l.buffer) < cap(l.buffer) {
@@ -235,19 +230,18 @@ func (l *AsyncLogger) Write(msg string, ctx []interface{}) {
 }
 
 func (l *AsyncLogger) AsyncFlush() {
+	buf := make([]byte, 0, MaxLogBytesSize)
 	for {
 		select {
 		case items := <-l.logChan:
-			buf := BufferPool.Get().([]byte)
-			buf = buf[:0]
-			w := bytes.NewBuffer(buf)
+			wb := bytes.NewBuffer(buf[:0])
 			for _, item := range items {
-				item.Format(w)
+				item.Format(wb)
 			}
-			l.f.Write(w.Bytes())
-			// l.f.Sync()
+			buf = wb.Bytes()
+			l.f.Write(buf)
+			l.f.Sync()
 			LogItemsPool.Put(items)
-			BufferPool.Put(buf)
 		case <-l.stop:
 			Info("async logger loop exited", "path", l.f.Name())
 			return
