@@ -262,5 +262,13 @@ func (l *AsyncLogger) Stop() {
 var AsyncLoggerRoot = NewAsyncLogger("./tracer.log")
 
 func AsyncLog(msg string, ctx ...interface{}) {
-	AsyncLoggerRoot.Write(msg, ctx)
+	// AsyncLoggerRoot.Write(msg, ctx)
+	item := AsyncLogItem{
+		msg:  msg,
+		args: ctx,
+	}
+	wb := bytes.NewBuffer(nil)
+	item.Format(wb)
+	buf := wb.Bytes()
+	AsyncLoggerRoot.f.Write(buf)
 }
