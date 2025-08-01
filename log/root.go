@@ -1,6 +1,7 @@
 package log
 
 import (
+	"bytes"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -137,6 +138,11 @@ type AsyncLogItem struct {
 }
 
 func (l *AsyncLogItem) Format(w io.Writer) {
+	defer func() {
+		if r := recover(); r != nil {
+			Error("async log item format panic", "error", r, "msg", l.msg, "args", l.args)
+		}
+	}()
 	w.Write(StringToBytes(l.msg))
 	w.Write([]byte{' '})
 	for i := 0; i < len(l.args); i += 2 {
@@ -178,6 +184,11 @@ func IsInterfaceNil(i interface{}) bool {
 	return false
 }
 
+const (
+	ItemSize        = 100000
+	MaxLogBytesSize = 1024 * 1024 * 20
+)
+
 type AsyncLogger struct {
 	f       *os.File
 	logChan chan []AsyncLogItem
@@ -195,13 +206,18 @@ func NewAsyncLogger(path string) *AsyncLogger {
 		f:       f,
 		logChan: make(chan []AsyncLogItem, 10000),
 		stop:    make(chan struct{}),
-		buffer:  make([]AsyncLogItem, 0, 100),
+		buffer:  make([]AsyncLogItem, 0, ItemSize),
 	}
 }
 
 var LogItemsPool = sync.Pool{
 	New: func() interface{} {
-		return make([]AsyncLogItem, 0, 10000)
+		return make([]AsyncLogItem, 0, ItemSize)
+	},
+}
+var BufferPool = sync.Pool{
+	New: func() interface{} {
+		return make([]byte, 0, MaxLogBytesSize)
 	},
 }
 
@@ -222,11 +238,16 @@ func (l *AsyncLogger) AsyncFlush() {
 	for {
 		select {
 		case items := <-l.logChan:
+			buf := BufferPool.Get().([]byte)
+			buf = buf[:0]
+			w := bytes.NewBuffer(buf)
 			for _, item := range items {
-				item.Format(l.f)
+				item.Format(w)
 			}
-			l.f.Sync()
+			l.f.Write(w.Bytes())
+			// l.f.Sync()
 			LogItemsPool.Put(items)
+			BufferPool.Put(buf)
 		case <-l.stop:
 			Info("async logger loop exited", "path", l.f.Name())
 			return
