@@ -3024,6 +3024,30 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 	return nil
 }
 
+func asyncWriteLoop(batchCh chan []ethdb.Batch) {
+	var (
+		flushStat = &stat{}
+	)
+	for batches := range batchCh {
+		start := time.Now()
+		batchSize := 0
+		wg := sync.WaitGroup{}
+		for _, batch := range batches {
+			batchSize += batch.ValueSize()
+			wg.Add(1)
+			go func(inner ethdb.Batch) {
+				defer wg.Done()
+				if inner.ValueSize() > 0 {
+					inner.Write()
+				}
+			}(batch)
+		}
+		wg.Wait()
+		flushStat.AddWithTime(batchSize, time.Since(start))
+		log.Info("flushing kvs...", "flush", flushStat)
+	}
+}
+
 // migrateDBWithShardingExpandMode migrates database with sharding in expand mode
 func migrateDBWithShardingExpandMode(ctx *cli.Context, targetDataDir string, version byte) error {
 	// src is a single db, read all the kvs and then write to the target db
@@ -3044,35 +3068,49 @@ func migrateDBWithShardingExpandMode(ctx *cli.Context, targetDataDir string, ver
 	defer it.Release()
 
 	var (
+		// batch
 		chainBatch = dstChainDB.NewBatch()
 		stateBatch = dstChainDB.GetStateStore().NewBatch()
 		snapBatch  = dstChainDB.GetSnapStore().NewBatch()
 		indexBatch = dstChainDB.GetTxIndexStore().NewBatch()
-		batchSize  = 0
-		genStat    = &stat{}
-		cateStat   = &stat{}
-		flushStat  = &stat{}
-		srcStat    = &stat{}
-		chainStat  = &stat{}
-		stateStat  = &stat{}
-		snapStat   = &stat{}
-		indexStat  = &stat{}
+
+		// batch channel
+		batchCh = make(chan []ethdb.Batch, 8)
+
+		// stats
+		batchSize = 0
+		genStat   = &stat{}
+		cateStat  = &stat{}
+		srcStat   = &stat{}
+		chainStat = &stat{}
+		stateStat = &stat{}
+		snapStat  = &stat{}
+		indexStat = &stat{}
+
+		wg = sync.WaitGroup{}
 	)
+
+	// start a async write loop
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		asyncWriteLoop(batchCh)
+	}()
+
 	for it.Next() {
-		key := make([]byte, len(it.Key()))
+		start := time.Now()
+		// copy a mock kv, key add version suffix
+		key := make([]byte, len(it.Key())+2)
 		value := make([]byte, len(it.Value()))
 		copy(key, it.Key())
+		key[len(it.Key())] = 's'
+		key[len(it.Key())+1] = version
 		copy(value, it.Value())
-
-		// regenerate the new key and value
-		start := time.Now()
-		key = generateNewKey(key, version)
-		value = shuffleValue(value)
 		kvSize := len(key) + len(value)
-		genStat.AddWithTime(kvSize, time.Since(start))
-
 		batchSize += kvSize
 		srcStat.Add(kvSize)
+		genStat.AddWithTime(kvSize, time.Since(start))
+
 		start = time.Now()
 		// put the key into the state, snap, or index database and delete from chaindb
 		category := categorizeDataByKey(key, value)
@@ -3094,60 +3132,28 @@ func migrateDBWithShardingExpandMode(ctx *cli.Context, targetDataDir string, ver
 
 		// flush the batch if it's too large
 		if batchSize >= 256*1024*1024 {
-			start = time.Now()
-			if err := stateBatch.Write(); err != nil {
-				return fmt.Errorf("failed to write state batch: %v", err)
-			}
-			if err := snapBatch.Write(); err != nil {
-				return fmt.Errorf("failed to write snap batch: %v", err)
-			}
-			if err := indexBatch.Write(); err != nil {
-				return fmt.Errorf("failed to write index batch: %v", err)
-			}
-			// save first, then delete
-			if err := chainBatch.Write(); err != nil {
-				return fmt.Errorf("failed to write chain batch: %v", err)
-			}
-			chainBatch.Reset()
-			stateBatch.Reset()
-			snapBatch.Reset()
-			indexBatch.Reset()
-			flushStat.AddWithTime(batchSize, time.Since(start))
+			batchCh <- []ethdb.Batch{stateBatch, snapBatch, indexBatch, chainBatch}
+			chainBatch = dstChainDB.NewBatch()
+			stateBatch = dstChainDB.GetStateStore().NewBatch()
+			snapBatch = dstChainDB.GetSnapStore().NewBatch()
+			indexBatch = dstChainDB.GetTxIndexStore().NewBatch()
 			batchSize = 0
-
-			log.Info("flushing kvs...", "src", srcStat, "gen", genStat, "cate", cateStat,
-				"flush", flushStat, "chain", chainStat,
-				"state", stateStat, "snap", snapStat, "index", indexStat)
+			log.Info("report kvs...", "src", srcStat, "gen", genStat, "cate", cateStat,
+				"chain", chainStat, "state", stateStat, "snap", snapStat, "index", indexStat)
 		}
 	}
 
 	// flush the remaining kvs
 	if batchSize > 0 {
-		start := time.Now()
-		if err := stateBatch.Write(); err != nil {
-			return fmt.Errorf("failed to write state batch: %v", err)
-		}
-		if err := snapBatch.Write(); err != nil {
-			return fmt.Errorf("failed to write snap batch: %v", err)
-		}
-		if err := indexBatch.Write(); err != nil {
-			return fmt.Errorf("failed to write index batch: %v", err)
-		}
-		// save first, then delete
-		if err := chainBatch.Write(); err != nil {
-			return fmt.Errorf("failed to write chain batch: %v", err)
-		}
-		chainBatch.Reset()
-		stateBatch.Reset()
-		snapBatch.Reset()
-		indexBatch.Reset()
-		flushStat.AddWithTime(batchSize, time.Since(start))
-		batchSize = 0
+		batchCh <- []ethdb.Batch{stateBatch, snapBatch, indexBatch, chainBatch}
 	}
 
+	// wait for the async write loop to finish
+	close(batchCh)
+	wg.Wait()
+
 	log.Info("migration completed", "src", srcStat, "gen", genStat, "cate", cateStat,
-		"flush", flushStat, "chain", chainStat,
-		"state", stateStat, "snap", snapStat, "index", indexStat)
+		"chain", chainStat, "state", stateStat, "snap", snapStat, "index", indexStat)
 
 	// compact the database
 	log.Info("compacting chaindb...")
