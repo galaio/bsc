@@ -2930,6 +2930,9 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 		snapBatch  = chainDB.GetSnapStore().NewBatch()
 		indexBatch = chainDB.GetTxIndexStore().NewBatch()
 		batchSize  = 0
+		genStat    = &stat{}
+		cateStat   = &stat{}
+		flushStat  = &stat{}
 		chainStat  = &stat{}
 		stateStat  = &stat{}
 		snapStat   = &stat{}
@@ -2940,11 +2943,14 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 		value := make([]byte, len(it.Value()))
 		copy(key, it.Key())
 		copy(value, it.Value())
+		start := time.Now()
 		kvSize := len(key) + len(value)
 		batchSize += kvSize
 		chainStat.Add(kvSize)
+		genStat.AddWithTime(kvSize, time.Since(start))
 
 		// put the key into the state, snap, or index database and delete from chaindb
+		start = time.Now()
 		category := categorizeDataByKey(key, value)
 		switch category {
 		case "state":
@@ -2960,12 +2966,11 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 			chainBatch.Delete(key)
 			indexStat.Add(kvSize)
 		}
+		cateStat.AddWithTime(kvSize, time.Since(start))
 
 		// flush the batch if it's too large
 		if batchSize >= 256*1024*1024 {
-			log.Info("flushing kvs...", "chain count", chainStat.count, "chain size", chainStat.size,
-				"state count", stateStat.count, "state size", stateStat.size, "snap count", snapStat.count,
-				"snap size", snapStat.size, "index count", indexStat.count, "index size", indexStat.size)
+			start = time.Now()
 			if err := stateBatch.Write(); err != nil {
 				return fmt.Errorf("failed to write state batch: %v", err)
 			}
@@ -2983,15 +2988,16 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 			stateBatch.Reset()
 			snapBatch.Reset()
 			indexBatch.Reset()
+			flushStat.AddWithTime(batchSize, time.Since(start))
 			batchSize = 0
+			log.Info("flushing kvs...", "chain", chainStat, "gen", genStat, "cate", cateStat,
+				"flush", flushStat, "state", stateStat, "snap", snapStat, "index", indexStat)
 		}
 	}
 
 	// flush the remaining kvs
 	if batchSize > 0 {
-		log.Info("flushing leftover kvs...", "chain count", chainStat.count, "chain size", chainStat.size,
-			"state count", stateStat.count, "state size", stateStat.size, "snap count", snapStat.count,
-			"snap size", snapStat.size, "index count", indexStat.count, "index size", indexStat.size)
+		start := time.Now()
 		if err := stateBatch.Write(); err != nil {
 			return fmt.Errorf("failed to write state batch: %v", err)
 		}
@@ -3009,12 +3015,12 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 		stateBatch.Reset()
 		snapBatch.Reset()
 		indexBatch.Reset()
+		flushStat.AddWithTime(batchSize, time.Since(start))
 		batchSize = 0
 	}
 
-	log.Info("migration completed", "chain count", chainStat.count, "chain size", chainStat.size,
-		"state count", stateStat.count, "state size", stateStat.size, "snap count", snapStat.count,
-		"snap size", snapStat.size, "index count", indexStat.count, "index size", indexStat.size)
+	log.Info("migration completed", "chain", chainStat, "gen", genStat, "cate", cateStat,
+		"flush", flushStat, "state", stateStat, "snap", snapStat, "index", indexStat)
 	return nil
 }
 
