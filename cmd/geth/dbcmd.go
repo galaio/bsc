@@ -3033,13 +3033,14 @@ func asyncWriteLoop(batchCh chan []ethdb.Batch) {
 		batchSize := 0
 		wg := sync.WaitGroup{}
 		for _, batch := range batches {
+			if batch.ValueSize() == 0 {
+				continue
+			}
 			batchSize += batch.ValueSize()
 			wg.Add(1)
 			go func(inner ethdb.Batch) {
 				defer wg.Done()
-				if inner.ValueSize() > 0 {
-					inner.Write()
-				}
+				inner.Write()
 			}(batch)
 		}
 		wg.Wait()
@@ -3081,6 +3082,7 @@ func migrateDBWithShardingExpandMode(ctx *cli.Context, targetDataDir string, ver
 		batchSize = 0
 		genStat   = &stat{}
 		cateStat  = &stat{}
+		asyncStat = &stat{}
 		srcStat   = &stat{}
 		chainStat = &stat{}
 		stateStat = &stat{}
@@ -3132,13 +3134,15 @@ func migrateDBWithShardingExpandMode(ctx *cli.Context, targetDataDir string, ver
 
 		// flush the batch if it's too large
 		if batchSize >= 256*1024*1024 {
+			start := time.Now()
 			batchCh <- []ethdb.Batch{stateBatch, snapBatch, indexBatch, chainBatch}
+			asyncStat.AddWithTime(batchSize, time.Since(start))
 			chainBatch = dstChainDB.NewBatch()
 			stateBatch = dstChainDB.GetStateStore().NewBatch()
 			snapBatch = dstChainDB.GetSnapStore().NewBatch()
 			indexBatch = dstChainDB.GetTxIndexStore().NewBatch()
 			batchSize = 0
-			log.Info("report kvs...", "src", srcStat, "gen", genStat, "cate", cateStat,
+			log.Info("report kvs...", "src", srcStat, "gen", genStat, "cate", cateStat, "async", asyncStat,
 				"chain", chainStat, "state", stateStat, "snap", snapStat, "index", indexStat)
 		}
 	}
@@ -3152,7 +3156,7 @@ func migrateDBWithShardingExpandMode(ctx *cli.Context, targetDataDir string, ver
 	close(batchCh)
 	wg.Wait()
 
-	log.Info("migration completed", "src", srcStat, "gen", genStat, "cate", cateStat,
+	log.Info("expand migration completed", "src", srcStat, "gen", genStat, "cate", cateStat, "async", asyncStat,
 		"chain", chainStat, "state", stateStat, "snap", snapStat, "index", indexStat)
 
 	// compact the database
