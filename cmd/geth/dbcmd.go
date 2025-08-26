@@ -2886,11 +2886,25 @@ func migrateDBWithSharding(ctx *cli.Context) error {
 type stat struct {
 	size  common.StorageSize
 	count uint64
+	time  time.Duration
 }
 
 func (s *stat) Add(size int) {
 	s.size += common.StorageSize(size)
 	s.count++
+}
+
+func (s *stat) AddWithTime(size int, time time.Duration) {
+	s.size += common.StorageSize(size)
+	s.time += time
+	s.count++
+}
+
+func (s *stat) String() string {
+	if s.time == 0 {
+		return fmt.Sprintf("%s|%d", s.size, s.count)
+	}
+	return fmt.Sprintf("%s|%d|%dus", s.size, s.count, (s.time / time.Duration(s.count)).Microseconds())
 }
 
 func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
@@ -3016,6 +3030,9 @@ func migrateDBWithShardingExpandMode(ctx *cli.Context, targetDataDir string, ver
 		snapBatch  = dstChainDB.GetSnapStore().NewBatch()
 		indexBatch = dstChainDB.GetTxIndexStore().NewBatch()
 		batchSize  = 0
+		genStat    = &stat{}
+		cateStat   = &stat{}
+		flushStat  = &stat{}
 		srcStat    = &stat{}
 		chainStat  = &stat{}
 		stateStat  = &stat{}
@@ -3029,12 +3046,15 @@ func migrateDBWithShardingExpandMode(ctx *cli.Context, targetDataDir string, ver
 		copy(value, it.Value())
 
 		// regenerate the new key and value
+		start := time.Now()
 		key = generateNewKey(key, version)
 		value = shuffleValue(value)
 		kvSize := len(key) + len(value)
+		genStat.AddWithTime(kvSize, time.Since(start))
+
 		batchSize += kvSize
 		srcStat.Add(kvSize)
-
+		start = time.Now()
 		// put the key into the state, snap, or index database and delete from chaindb
 		category := categorizeDataByKey(key, value)
 		switch category {
@@ -3051,13 +3071,11 @@ func migrateDBWithShardingExpandMode(ctx *cli.Context, targetDataDir string, ver
 			chainBatch.Put(key, value)
 			chainStat.Add(kvSize)
 		}
+		cateStat.AddWithTime(kvSize, time.Since(start))
 
 		// flush the batch if it's too large
 		if batchSize >= 256*1024*1024 {
-			log.Info("flushing kvs...", "src count", srcStat.count, "src size", srcStat.size,
-				"chain count", chainStat.count, "chain size", chainStat.size,
-				"state count", stateStat.count, "state size", stateStat.size, "snap count", snapStat.count,
-				"snap size", snapStat.size, "index count", indexStat.count, "index size", indexStat.size)
+			start = time.Now()
 			if err := stateBatch.Write(); err != nil {
 				return fmt.Errorf("failed to write state batch: %v", err)
 			}
@@ -3075,16 +3093,18 @@ func migrateDBWithShardingExpandMode(ctx *cli.Context, targetDataDir string, ver
 			stateBatch.Reset()
 			snapBatch.Reset()
 			indexBatch.Reset()
+			flushStat.AddWithTime(batchSize, time.Since(start))
 			batchSize = 0
+
+			log.Info("flushing kvs...", "src", srcStat, "gen", genStat, "cate", cateStat,
+				"flush", flushStat, "chain", chainStat,
+				"state", stateStat, "snap", snapStat, "index", indexStat)
 		}
 	}
 
 	// flush the remaining kvs
 	if batchSize > 0 {
-		log.Info("flushing leftover kvs...", "src count", srcStat.count, "src size", srcStat.size,
-			"chain count", chainStat.count, "chain size", chainStat.size,
-			"state count", stateStat.count, "state size", stateStat.size, "snap count", snapStat.count,
-			"snap size", snapStat.size, "index count", indexStat.count, "index size", indexStat.size)
+		start := time.Now()
 		if err := stateBatch.Write(); err != nil {
 			return fmt.Errorf("failed to write state batch: %v", err)
 		}
@@ -3102,13 +3122,13 @@ func migrateDBWithShardingExpandMode(ctx *cli.Context, targetDataDir string, ver
 		stateBatch.Reset()
 		snapBatch.Reset()
 		indexBatch.Reset()
+		flushStat.AddWithTime(batchSize, time.Since(start))
 		batchSize = 0
 	}
 
-	log.Info("migration completed", "src count", srcStat.count, "src size", srcStat.size,
-		"chain count", chainStat.count, "chain size", chainStat.size,
-		"state count", stateStat.count, "state size", stateStat.size, "snap count", snapStat.count,
-		"snap size", snapStat.size, "index count", indexStat.count, "index size", indexStat.size)
+	log.Info("migration completed", "src", srcStat, "gen", genStat, "cate", cateStat,
+		"flush", flushStat, "chain", chainStat,
+		"state", stateStat, "snap", snapStat, "index", indexStat)
 
 	// compact the database
 	log.Info("compacting chaindb...")
