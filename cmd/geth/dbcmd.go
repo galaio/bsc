@@ -2883,6 +2883,19 @@ func migrateDBWithSharding(ctx *cli.Context) error {
 	return nil
 }
 
+type PrettyTime time.Duration
+
+func (d PrettyTime) String() string {
+	t := time.Duration(d)
+	if t < time.Millisecond {
+		return fmt.Sprintf("%.2fus", float64(t.Nanoseconds())/1000)
+	}
+	if t < time.Second {
+		return fmt.Sprintf("%.2fms", float64(t.Microseconds())/1000)
+	}
+	return fmt.Sprintf("%.2fs", float64(t.Milliseconds())/1000)
+}
+
 type stat struct {
 	size  common.StorageSize
 	count uint64
@@ -2904,7 +2917,7 @@ func (s *stat) String() string {
 	if s.time == 0 {
 		return fmt.Sprintf("%s|%d", s.size, s.count)
 	}
-	return fmt.Sprintf("%s|%d|%dus", s.size, s.count, (s.time / time.Duration(s.count)).Microseconds())
+	return fmt.Sprintf("%s|%d|%v|%v", s.size, s.count, PrettyTime(s.time), PrettyTime(s.time/time.Duration(s.count)))
 }
 
 func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
