@@ -3100,22 +3100,20 @@ func migrateDBWithShardingExpandMode(ctx *cli.Context, targetDataDir string, ver
 	}()
 
 	for it.Next() {
+		// categorize the key
 		start := time.Now()
-		// copy a mock kv, key add version suffix
-		key := make([]byte, len(it.Key())+2)
-		value := make([]byte, len(it.Value()))
-		copy(key, it.Key())
-		key[len(it.Key())] = 's'
-		key[len(it.Key())+1] = version
-		copy(value, it.Value())
-		kvSize := len(key) + len(value)
+		category := categorizeDataByKey(it.Key(), it.Value())
+		kvSize := len(it.Key()) + len(it.Value()) + 2
 		batchSize += kvSize
 		srcStat.Add(kvSize)
+		cateStat.AddWithTime(kvSize, time.Since(start))
+
+		// copy a mock kv, key add version suffix
+		start = time.Now()
+		key, value := mockNewKV(it.Key(), it.Value(), category, version)
 		genStat.AddWithTime(kvSize, time.Since(start))
 
-		start = time.Now()
 		// put the key into the state, snap, or index database and delete from chaindb
-		category := categorizeDataByKey(key, value)
 		switch category {
 		case "state":
 			stateBatch.Put(key, value)
@@ -3130,7 +3128,6 @@ func migrateDBWithShardingExpandMode(ctx *cli.Context, targetDataDir string, ver
 			chainBatch.Put(key, value)
 			chainStat.Add(kvSize)
 		}
-		cateStat.AddWithTime(kvSize, time.Since(start))
 
 		// flush the batch if it's too large
 		if batchSize >= 256*1024*1024 {
@@ -3177,4 +3174,44 @@ func migrateDBWithShardingExpandMode(ctx *cli.Context, targetDataDir string, ver
 		return fmt.Errorf("failed to compact indexdb: %v", err)
 	}
 	return nil
+}
+
+func mockNewKV(key, value []byte, category string, version byte) ([]byte, []byte) {
+	nk := make([]byte, len(key)+2)
+	nv := make([]byte, len(value))
+
+	copy(nk, key)
+	switch category {
+	case "state":
+		// TrieNodeStoragePrefix + accountHash + hexPath -> trie node
+		if nk[0] == rawdb.TrieNodeStoragePrefix[0] {
+			genMockBytes(nk[len(rawdb.TrieNodeStoragePrefix):len(rawdb.TrieNodeStoragePrefix)+common.HashLength], version)
+		}
+	case "snapshot":
+		// // SnapshotAccountPrefix + account hash -> account trie value
+		if nk[0] == rawdb.SnapshotAccountPrefix[0] {
+			genMockBytes(nk[len(rawdb.SnapshotAccountPrefix):], version)
+		}
+		// SnapshotStoragePrefix + account hash + storage hash -> storage trie value
+		if nk[0] == rawdb.SnapshotStoragePrefix[0] {
+			genMockBytes(nk[len(rawdb.SnapshotStoragePrefix):], version)
+		}
+	case "txindex":
+		// txLookupPrefix        = []byte("l") // txLookupPrefix + hash
+		if nk[0] == 'l' {
+			genMockBytes(nk[1:], version)
+		}
+	default:
+	}
+	nk[len(key)] = 'v'
+	nk[len(key)+1] = version
+	copy(nv, value)
+	genMockBytes(nv, version)
+	return nk, nv
+}
+
+func genMockBytes(raw []byte, ver byte) {
+	for i := range raw {
+		raw[i] = raw[i] ^ ver
+	}
 }
