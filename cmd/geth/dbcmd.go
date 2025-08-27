@@ -3184,21 +3184,21 @@ func mockNewKV(key, value []byte, category string, version byte) ([]byte, []byte
 	switch category {
 	case "state":
 		// TrieNodeStoragePrefix + accountHash + hexPath -> trie node
-		if nk[0] == rawdb.TrieNodeStoragePrefix[0] {
+		if nk[0] == rawdb.TrieNodeStoragePrefix[0] && len(nk) >= len(rawdb.TrieNodeStoragePrefix)+common.HashLength {
 			genMockBytes(nk[len(rawdb.TrieNodeStoragePrefix):len(rawdb.TrieNodeStoragePrefix)+common.HashLength], version)
 		}
 	case "snapshot":
 		// // SnapshotAccountPrefix + account hash -> account trie value
-		if nk[0] == rawdb.SnapshotAccountPrefix[0] {
+		if nk[0] == rawdb.SnapshotAccountPrefix[0] && len(nk) >= len(rawdb.SnapshotAccountPrefix)+common.HashLength {
 			genMockBytes(nk[len(rawdb.SnapshotAccountPrefix):], version)
 		}
 		// SnapshotStoragePrefix + account hash + storage hash -> storage trie value
-		if nk[0] == rawdb.SnapshotStoragePrefix[0] {
+		if nk[0] == rawdb.SnapshotStoragePrefix[0] && len(nk) >= len(rawdb.SnapshotStoragePrefix)+2*common.HashLength {
 			genMockBytes(nk[len(rawdb.SnapshotStoragePrefix):], version)
 		}
 	case "txindex":
 		// txLookupPrefix        = []byte("l") // txLookupPrefix + hash
-		if nk[0] == 'l' {
+		if nk[0] == 'l' && len(nk) >= 1+common.HashLength {
 			genMockBytes(nk[1:], version)
 		}
 	default:
