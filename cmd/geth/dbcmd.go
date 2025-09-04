@@ -1774,103 +1774,67 @@ func migrateDBWithMigratingTrie(ctx *cli.Context) error {
 	}
 	defer chainDB.Close()
 
-	log.Info("Starting migrate sharding trie", "source", triePath)
-
-	// migrate TrieNodeAccountPrefix, TrieNodeStoragePrefix, CodePrefix
-	// case bytes.HasPrefix(key, []byte("L")) && len(key) == (1+common.HashLength): // stateIDPrefix
-	// 	return true
-	// case rawdb.IsAccountTrieNode(key):
-	// 	return true
-	// case rawdb.IsStorageTrieNode(key):
-	// 	return true
-	// case bytes.HasPrefix(key, []byte("X")): // Custom X prefix keys for testing
-	// 	return true
-	// case bytes.HasPrefix(key, []byte("Y")): // Custom Y prefix keys for testing
-	// 	return true
-	// case bytes.HasPrefix(key, rawdb.PreimagePrefix) && len(key) == (len(rawdb.PreimagePrefix)+common.HashLength):
-	// 	return true
-	// case bytes.HasPrefix(key, []byte("c")) && len(key) == (1+common.HashLength): // CodePrefix - contract code
-	// 	return true
-	// default:
-	// 	// Check specific metadata keys
-	// 	keyStr := string(key)
-	// 	if keyStr == "TrieSync" || keyStr == "TrieJournal" || keyStr == "LastStateID" {
-	// 		return true
-	// 	}
-	// }
-
-	// prefixKeys := map[string]func([]byte) bool{
-	// 	string(rawdb.TrieNodeAccountPrefix): rawdb.IsAccountTrieNode,
-	// 	string(rawdb.TrieNodeStoragePrefix): rawdb.IsStorageTrieNode,
-	// 	string(rawdb.CodePrefix):            func(key []byte) bool { return bytes.HasPrefix(key, []byte("c")) && len(key) == (1+common.HashLength) },
-	// 	string(rawdb.PreimagePrefix): func(key []byte) bool {
-	// 		return bytes.HasPrefix(key, rawdb.PreimagePrefix) && len(key) == (len(rawdb.PreimagePrefix)+common.HashLength)
-	// 	},
-	// 	string([]byte("L")): func(key []byte) bool { return bytes.HasPrefix(key, []byte("L")) && len(key) == (1+common.HashLength) },
-	// }
+	log.Info("Starting complete database migration", "source", migrateTrieFrom, "target", triePath)
 
 	var (
-		stateDB = chainDB.GetStateStore()
-		start   = time.Now()
-		count   int64
-		size    common.StorageSize
-		// batch     = stateDB.NewBatch()
-		// batchSize = 0
-		// logged    = time.Now()
+		stateDB   = chainDB.GetStateStore()
+		batch     = stateDB.NewBatch()
+		start     = time.Now()
+		count     int64
+		size      common.StorageSize
+		batchSize = 0
+		logged    = time.Now()
 	)
-	// for prefix, isValid := range prefixKeys {
-	// 	log.Info("migrating trie data", "prefix", prefix)
-	// 	it := fromdb.NewIterator([]byte(prefix), nil)
-	// 	for it.Next() {
-	// 		key := make([]byte, len(it.Key()))
-	// 		value := make([]byte, len(it.Value()))
-	// 		copy(key, it.Key())
-	// 		copy(value, it.Value())
-	// 		if !isValid(key) {
-	// 			continue
-	// 		}
-	// 		count++
-	// 		batch.Put(key, value)
-	// 		batchSize += len(key) + len(it.Value())
-	// 		size += common.StorageSize(len(key) + len(it.Value()))
-	// 		if batchSize > 256*1024*1024 {
-	// 			if err := batch.Write(); err != nil {
-	// 				return err
-	// 			}
-	// 			batch.Reset()
-	// 			batchSize = 0
-	// 		}
-	// 		if time.Since(logged) > 8*time.Second {
-	// 			log.Info("migrating trie data", "count", count, "size", size, "elapsed", common.PrettyDuration(time.Since(start)))
-	// 			logged = time.Now()
-	// 		}
-	// 	}
 
-	// 	if batch.ValueSize() > 0 {
-	// 		if err := batch.Write(); err != nil {
-	// 			return err
-	// 		}
-	// 		batch.Reset()
-	// 	}
-	// 	it.Release()
-	// }
+	it := fromdb.NewIterator(nil, nil)
+	defer it.Release()
 
-	for _, rk := range [][]byte{[]byte("TrieSync"), []byte("TrieJournal"), []byte("LastStateID")} {
-		rv, err := fromdb.Get(rk)
-		if err != nil {
-			return err
-		}
-		key := make([]byte, len(rk))
-		value := make([]byte, len(rv))
-		copy(key, rk)
-		copy(value, rv)
+	for it.Next() {
+		key := make([]byte, len(it.Key()))
+		value := make([]byte, len(it.Value()))
+		copy(key, it.Key())
+		copy(value, it.Value())
+
 		count++
-		size += common.StorageSize(len(key) + len(value))
-		if err := stateDB.Put(key, value); err != nil {
-			return err
+		batch.Put(key, value)
+		keyValueSize := len(key) + len(value)
+		batchSize += keyValueSize
+		size += common.StorageSize(keyValueSize)
+
+		if batchSize > 256*1024*1024 {
+			if err := batch.Write(); err != nil {
+				return fmt.Errorf("failed to write batch: %v", err)
+			}
+			batch.Reset()
+			batchSize = 0
+		}
+
+		if time.Since(logged) > 8*time.Second {
+			log.Info("migrating database",
+				"count", count,
+				"size", size,
+				"speed", fmt.Sprintf("%.2f MB/s", float64(size)/time.Since(start).Seconds()/1024/1024),
+				"elapsed", common.PrettyDuration(time.Since(start)))
+			logged = time.Now()
 		}
 	}
-	log.Info("migrating trie data completed", "count", count, "size", size, "elapsed", common.PrettyDuration(time.Since(start)))
+
+	if batch.ValueSize() > 0 {
+		if err := batch.Write(); err != nil {
+			return fmt.Errorf("failed to write final batch: %v", err)
+		}
+	}
+
+	if err := it.Error(); err != nil {
+		return fmt.Errorf("iterator error: %v", err)
+	}
+
+	log.Info("Database migration completed successfully",
+		"total_count", count,
+		"total_size", size,
+		"average_speed", fmt.Sprintf("%.2f MB/s", float64(size)/time.Since(start).Seconds()/1024/1024),
+		"elapsed", common.PrettyDuration(time.Since(start)))
+
 	return nil
 }
 
