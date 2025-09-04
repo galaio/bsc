@@ -1810,12 +1810,13 @@ func migrateDBWithMigratingTrie(ctx *cli.Context) error {
 	// }
 
 	var (
-		batch = chainDB.GetStateStore().NewBatch()
-		start = time.Now()
-		// logged    = time.Now()
-		count int64
-		size  common.StorageSize
+		stateDB = chainDB.GetStateStore()
+		start   = time.Now()
+		count   int64
+		size    common.StorageSize
+		// batch     = stateDB.NewBatch()
 		// batchSize = 0
+		// logged    = time.Now()
 	)
 	// for prefix, isValid := range prefixKeys {
 	// 	log.Info("migrating trie data", "prefix", prefix)
@@ -1854,22 +1855,20 @@ func migrateDBWithMigratingTrie(ctx *cli.Context) error {
 	// 	it.Release()
 	// }
 
-	for _, key := range []string{"TrieSync", "TrieJournal", "LastStateID"} {
-		raw, err := fromdb.Get([]byte(key))
+	for _, rk := range [][]byte{[]byte("TrieSync"), []byte("TrieJournal"), []byte("LastStateID")} {
+		rv, err := fromdb.Get(rk)
 		if err != nil {
 			return err
 		}
-		key := make([]byte, len(key))
-		value := make([]byte, len(raw))
-		copy(key, []byte(key))
-		copy(value, raw)
-		batch.Put(key, value)
-	}
-	if batch.ValueSize() > 0 {
-		if err := batch.Write(); err != nil {
+		key := make([]byte, len(rk))
+		value := make([]byte, len(rv))
+		copy(key, rk)
+		copy(value, rv)
+		count++
+		size += common.StorageSize(len(key) + len(value))
+		if err := stateDB.Put(key, value); err != nil {
 			return err
 		}
-		batch.Reset()
 	}
 	log.Info("migrating trie data completed", "count", count, "size", size, "elapsed", common.PrettyDuration(time.Since(start)))
 	return nil
