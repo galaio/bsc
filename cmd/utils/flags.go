@@ -149,6 +149,17 @@ var (
 		Usage:    "Delete trie data from the source database",
 		Category: flags.EthCategory,
 	}
+	MigrateTrieFlag = &cli.BoolFlag{
+		Name:     "migratetrie",
+		Usage:    "Migrate trie data from the source database",
+		Category: flags.EthCategory,
+	}
+	MigrateTrieFromFlag = &cli.StringFlag{
+		Name:     "migratetriefrom",
+		Usage:    "Migrate trie data from the source database",
+		Value:    "",
+		Category: flags.EthCategory,
+	}
 	AncientFlag = &flags.DirectoryFlag{
 		Name:     "datadir.ancient",
 		Usage:    "Root directory for ancient data (default = inside chaindata)",

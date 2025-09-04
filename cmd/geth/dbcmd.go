@@ -339,6 +339,8 @@ of ancientStore, will also displays the reserved number of blocks in ancientStor
 			utils.ExpandModeFlag,
 			utils.DeleteSnapIndexFlag,
 			utils.DeleteTrieFlag,
+			utils.MigrateTrieFlag,
+			utils.MigrateTrieFromFlag,
 		}, utils.NetworkFlags),
 		Description: `This command migrates a single chaindb database to multi-database format.
 
@@ -1596,6 +1598,7 @@ func migrateDatabase(ctx *cli.Context) error {
 	expandMode := ctx.Bool(utils.ExpandModeFlag.Name)
 	deleteSnapIndex := ctx.Bool(utils.DeleteSnapIndexFlag.Name)
 	deleteTrie := ctx.Bool(utils.DeleteTrieFlag.Name)
+	migrateTrie := ctx.Bool(utils.MigrateTrieFlag.Name)
 
 	if expandMode {
 		// Expand mode: expect [target-datadir] [version]
@@ -1633,6 +1636,13 @@ func migrateDatabase(ctx *cli.Context) error {
 		log.Info("migrateDatabase with deleting trie data")
 		if err := migrateDBWithDeletingTrie(ctx); err != nil {
 			log.Error("failed to migrate database with deleting trie data", "error", err)
+			return err
+		}
+		return nil
+	} else if migrateTrie {
+		log.Info("migrateDatabase with migrating trie data")
+		if err := migrateDBWithMigratingTrie(ctx); err != nil {
+			log.Error("failed to migrate database with migrating trie data", "error", err)
 			return err
 		}
 		return nil
@@ -1729,6 +1739,138 @@ func migrateDatabase(ctx *cli.Context) error {
 
 	// Start in-place migration
 	return performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB, sourceChainDataPath)
+}
+
+func migrateDBWithMigratingTrie(ctx *cli.Context) error {
+	cacheSize := ctx.Int(utils.CacheFlag.Name)
+	cacheDB := ctx.Int(utils.CacheDatabaseFlag.Name)
+	migrateTrieFrom := ctx.String(utils.MigrateTrieFromFlag.Name)
+	checkTrieFrom := common.FileExist(migrateTrieFrom)
+	if !checkTrieFrom {
+		log.Error("trie data not found", "path", migrateTrieFrom)
+		return nil
+	}
+	fromdb, err := openTargetDatabase(migrateTrieFrom, cacheSize*cacheDB*7/100, 64)
+	if err != nil {
+		return fmt.Errorf("failed to open source trie database: %v", err)
+	}
+	defer fromdb.Close()
+
+	// Create target stack using standard geth configuration (handles --datadir)
+	stack, cfg := makeConfigNode(ctx)
+	defer stack.Close()
+
+	// check if shardingdb
+	triePath := stack.ResolvePath("trie")
+	exists := common.FileExist(triePath)
+	if !exists {
+		log.Error("trie data not found", "path", triePath)
+		return nil
+	}
+
+	chainDB, err := initMultiDBs(stack, cfg, false)
+	if err != nil {
+		return fmt.Errorf("failed to init multidbs: %v", err)
+	}
+	defer chainDB.Close()
+
+	log.Info("Starting migrate sharding trie", "source", triePath)
+
+	// migrate TrieNodeAccountPrefix, TrieNodeStoragePrefix, CodePrefix
+	// case bytes.HasPrefix(key, []byte("L")) && len(key) == (1+common.HashLength): // stateIDPrefix
+	// 	return true
+	// case rawdb.IsAccountTrieNode(key):
+	// 	return true
+	// case rawdb.IsStorageTrieNode(key):
+	// 	return true
+	// case bytes.HasPrefix(key, []byte("X")): // Custom X prefix keys for testing
+	// 	return true
+	// case bytes.HasPrefix(key, []byte("Y")): // Custom Y prefix keys for testing
+	// 	return true
+	// case bytes.HasPrefix(key, rawdb.PreimagePrefix) && len(key) == (len(rawdb.PreimagePrefix)+common.HashLength):
+	// 	return true
+	// case bytes.HasPrefix(key, []byte("c")) && len(key) == (1+common.HashLength): // CodePrefix - contract code
+	// 	return true
+	// default:
+	// 	// Check specific metadata keys
+	// 	keyStr := string(key)
+	// 	if keyStr == "TrieSync" || keyStr == "TrieJournal" || keyStr == "LastStateID" {
+	// 		return true
+	// 	}
+	// }
+
+	prefixKeys := map[string]func([]byte) bool{
+		string(rawdb.TrieNodeAccountPrefix): rawdb.IsAccountTrieNode,
+		string(rawdb.TrieNodeStoragePrefix): rawdb.IsStorageTrieNode,
+		string(rawdb.CodePrefix):            func(key []byte) bool { return bytes.HasPrefix(key, []byte("c")) && len(key) == (1+common.HashLength) },
+		string(rawdb.PreimagePrefix): func(key []byte) bool {
+			return bytes.HasPrefix(key, rawdb.PreimagePrefix) && len(key) == (len(rawdb.PreimagePrefix)+common.HashLength)
+		},
+		string([]byte("L")): func(key []byte) bool { return bytes.HasPrefix(key, []byte("L")) && len(key) == (1+common.HashLength) },
+	}
+
+	var (
+		batch     = chainDB.GetStateStore().NewBatch()
+		start     = time.Now()
+		logged    = time.Now()
+		count     int64
+		size      common.StorageSize
+		batchSize = 0
+	)
+	for prefix, isValid := range prefixKeys {
+		log.Info("migrating trie data", "prefix", prefix)
+		it := fromdb.NewIterator([]byte(prefix), nil)
+		for it.Next() {
+			key := make([]byte, len(it.Key()))
+			value := make([]byte, len(it.Value()))
+			copy(key, it.Key())
+			copy(value, it.Value())
+			if !isValid(key) {
+				continue
+			}
+			count++
+			batch.Put(key, value)
+			batchSize += len(key) + len(it.Value())
+			size += common.StorageSize(len(key) + len(it.Value()))
+			if batchSize > 256*1024*1024 {
+				if err := batch.Write(); err != nil {
+					return err
+				}
+				batch.Reset()
+				batchSize = 0
+			}
+			if time.Since(logged) > 8*time.Second {
+				log.Info("Deleting trie data", "count", count, "size", size, "elapsed", common.PrettyDuration(time.Since(start)))
+				logged = time.Now()
+			}
+		}
+
+		if batch.ValueSize() > 0 {
+			if err := batch.Write(); err != nil {
+				return err
+			}
+			batch.Reset()
+		}
+		it.Release()
+	}
+
+	for _, key := range []string{"TrieSync", "TrieJournal", "LastStateID"} {
+		raw, err := fromdb.Get([]byte(key))
+		if err != nil {
+			return err
+		}
+		value := make([]byte, len(raw))
+		copy(value, raw)
+		batch.Put([]byte(key), value)
+	}
+	if batch.ValueSize() > 0 {
+		if err := batch.Write(); err != nil {
+			return err
+		}
+		batch.Reset()
+	}
+	log.Info("try to migrate trie data completed")
+	return nil
 }
 
 func migrateDBWithDeletingSnapIndex(ctx *cli.Context) error {
@@ -1851,7 +1993,8 @@ func migrateDBWithDeletingTrie(ctx *cli.Context) error {
 	// 	}
 	// }
 
-	for _, db := range dbs {
+	for i, db := range dbs {
+		log.Info("deleting trie data", "shard", i)
 		if err := deleteTrieData(db); err != nil {
 			return fmt.Errorf("failed to delete trie data: %v", err)
 		}
