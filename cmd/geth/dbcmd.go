@@ -1840,7 +1840,7 @@ func migrateDBWithMigratingTrie(ctx *cli.Context) error {
 				batchSize = 0
 			}
 			if time.Since(logged) > 8*time.Second {
-				log.Info("Deleting trie data", "count", count, "size", size, "elapsed", common.PrettyDuration(time.Since(start)))
+				log.Info("migrating trie data", "count", count, "size", size, "elapsed", common.PrettyDuration(time.Since(start)))
 				logged = time.Now()
 			}
 		}
