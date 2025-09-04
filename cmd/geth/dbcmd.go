@@ -1777,14 +1777,31 @@ func migrateDBWithMigratingTrie(ctx *cli.Context) error {
 	log.Info("Starting complete database migration", "source", migrateTrieFrom, "target", triePath)
 
 	var (
-		stateDB   = chainDB.GetStateStore()
-		batch     = stateDB.NewBatch()
-		start     = time.Now()
-		count     int64
-		size      common.StorageSize
-		batchSize = 0
-		logged    = time.Now()
+		stateDB      = chainDB.GetStateStore()
+		batch        = stateDB.NewBatch()
+		start        = time.Now()
+		count        int64
+		size         common.StorageSize
+		batchSize    = 0
+		logged       = time.Now()
+		wg           = sync.WaitGroup{}
+		batchChannel = make(chan ethdb.Batch, 10)
+		errorChannel = make(chan error, 10)
+		writeCnt     = 5
 	)
+
+	for i := 0; i < writeCnt; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for batch := range batchChannel {
+				if err := batch.Write(); err != nil {
+					errorChannel <- fmt.Errorf("failed to write batch: %v", err)
+				}
+				batch.Reset()
+			}
+		}()
+	}
 
 	it := fromdb.NewIterator(nil, nil)
 	defer it.Release()
@@ -1802,13 +1819,32 @@ func migrateDBWithMigratingTrie(ctx *cli.Context) error {
 		size += common.StorageSize(keyValueSize)
 
 		if batchSize > 256*1024*1024 {
-			if err := batch.Write(); err != nil {
-				return fmt.Errorf("failed to write batch: %v", err)
-			}
-			batch.Reset()
+			batchChannel <- batch
+			batch = stateDB.NewBatch()
 			batchSize = 0
+			select {
+			case err := <-errorChannel:
+				return fmt.Errorf("failed to write batch: %v", err)
+			default:
+				// Continue processing
+			}
 		}
+		if count%10000000 == 0 {
+			start := time.Now()
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			currentMemMB := m.Alloc / (1024 * 1024)
 
+			runtime.GC()
+
+			runtime.ReadMemStats(&m)
+			afterGCMemMB := m.Alloc / (1024 * 1024)
+
+			log.Info("🧠 Memory monitoring & GC",
+				"beforeGC_MB", currentMemMB,
+				"afterGC_MB", afterGCMemMB,
+				"duration", time.Since(start))
+		}
 		if time.Since(logged) > 8*time.Second {
 			log.Info("migrating database",
 				"count", count,
@@ -1819,9 +1855,20 @@ func migrateDBWithMigratingTrie(ctx *cli.Context) error {
 		}
 	}
 
+	// just sync write the last batch
 	if batch.ValueSize() > 0 {
 		if err := batch.Write(); err != nil {
 			return fmt.Errorf("failed to write final batch: %v", err)
+		}
+	}
+
+	close(batchChannel)
+	wg.Wait()
+
+	close(errorChannel)
+	for err := range errorChannel {
+		if err != nil {
+			return err
 		}
 	}
 
