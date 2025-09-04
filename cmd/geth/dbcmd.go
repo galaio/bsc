@@ -338,6 +338,7 @@ of ancientStore, will also displays the reserved number of blocks in ancientStor
 			utils.CacheDatabaseFlag,
 			utils.ExpandModeFlag,
 			utils.DeleteSnapIndexFlag,
+			utils.DeleteTrieFlag,
 		}, utils.NetworkFlags),
 		Description: `This command migrates a single chaindb database to multi-database format.
 
@@ -1594,6 +1595,7 @@ func migrateDatabase(ctx *cli.Context) error {
 	// Parse arguments based on expand mode
 	expandMode := ctx.Bool(utils.ExpandModeFlag.Name)
 	deleteSnapIndex := ctx.Bool(utils.DeleteSnapIndexFlag.Name)
+	deleteTrie := ctx.Bool(utils.DeleteTrieFlag.Name)
 
 	if expandMode {
 		// Expand mode: expect [target-datadir] [version]
@@ -1624,6 +1626,13 @@ func migrateDatabase(ctx *cli.Context) error {
 		log.Info("migrateDatabase with deleting snap and index data")
 		if err := migrateDBWithDeletingSnapIndex(ctx); err != nil {
 			log.Error("failed to migrate database with deleting snap and index data", "error", err)
+			return err
+		}
+		return nil
+	} else if deleteTrie {
+		log.Info("migrateDatabase with deleting trie data")
+		if err := migrateDBWithDeletingTrie(ctx); err != nil {
+			log.Error("failed to migrate database with deleting trie data", "error", err)
 			return err
 		}
 		return nil
@@ -1790,6 +1799,132 @@ func migrateDBWithDeletingSnapIndex(ctx *cli.Context) error {
 		return fmt.Errorf("failed to delete transaction index data: %v", err)
 	}
 
+	return nil
+}
+
+func migrateDBWithDeletingTrie(ctx *cli.Context) error {
+	cacheSize := ctx.Int(utils.CacheFlag.Name)
+	cacheDB := ctx.Int(utils.CacheDatabaseFlag.Name)
+	// Create source stack using standard geth configuration (handles --datadir)
+	sourceStack, _ := makeConfigNode(ctx)
+	defer sourceStack.Close()
+
+	// check if shardingdb
+	triePath := sourceStack.ResolvePath("trie")
+	exists := common.FileExist(triePath)
+	if !exists {
+		log.Error("trie data not found", "path", triePath)
+		return nil
+	}
+	log.Info("Starting delete sharding trie", "source", triePath)
+
+	dbs := []ethdb.KeyValueStore{}
+	for i := 0; i < 8; i++ {
+		db, err := openTargetDatabase(filepath.Join(triePath, fmt.Sprintf("shard%04d", i)), cacheSize*cacheDB*7/100, 64)
+		if err != nil {
+			return fmt.Errorf("failed to open source chain database: %v", err)
+		}
+		defer db.Close()
+		dbs = append(dbs, db)
+	}
+
+	// delete TrieNodeAccountPrefix, TrieNodeStoragePrefix, CodePrefix
+	// case bytes.HasPrefix(key, []byte("L")) && len(key) == (1+common.HashLength): // stateIDPrefix
+	// 	return true
+	// case rawdb.IsAccountTrieNode(key):
+	// 	return true
+	// case rawdb.IsStorageTrieNode(key):
+	// 	return true
+	// case bytes.HasPrefix(key, []byte("X")): // Custom X prefix keys for testing
+	// 	return true
+	// case bytes.HasPrefix(key, []byte("Y")): // Custom Y prefix keys for testing
+	// 	return true
+	// case bytes.HasPrefix(key, rawdb.PreimagePrefix) && len(key) == (len(rawdb.PreimagePrefix)+common.HashLength):
+	// 	return true
+	// case bytes.HasPrefix(key, []byte("c")) && len(key) == (1+common.HashLength): // CodePrefix - contract code
+	// 	return true
+	// default:
+	// 	// Check specific metadata keys
+	// 	keyStr := string(key)
+	// 	if keyStr == "TrieSync" || keyStr == "TrieJournal" || keyStr == "LastStateID" {
+	// 		return true
+	// 	}
+	// }
+
+	for _, db := range dbs {
+		if err := deleteTrieData(db); err != nil {
+			return fmt.Errorf("failed to delete trie data: %v", err)
+		}
+	}
+	log.Info("try to delete trie data completed")
+
+	return nil
+}
+
+func deleteTrieData(db ethdb.KeyValueStore) error {
+	prefixKeys := map[string]func([]byte) bool{
+		string(rawdb.TrieNodeAccountPrefix): rawdb.IsAccountTrieNode,
+		string(rawdb.TrieNodeStoragePrefix): rawdb.IsStorageTrieNode,
+		string(rawdb.CodePrefix):            func(key []byte) bool { return bytes.HasPrefix(key, []byte("c")) && len(key) == (1+common.HashLength) },
+		string(rawdb.PreimagePrefix): func(key []byte) bool {
+			return bytes.HasPrefix(key, rawdb.PreimagePrefix) && len(key) == (len(rawdb.PreimagePrefix)+common.HashLength)
+		},
+		string([]byte("L")): func(key []byte) bool { return bytes.HasPrefix(key, []byte("L")) && len(key) == (1+common.HashLength) },
+	}
+
+	var (
+		batch     = db.NewBatch()
+		start     = time.Now()
+		logged    = time.Now()
+		count     int64
+		size      common.StorageSize
+		batchSize = 0
+	)
+	for prefix, isValid := range prefixKeys {
+		it := db.NewIterator([]byte(prefix), nil)
+		for it.Next() {
+			key := make([]byte, len(it.Key()))
+			copy(key, it.Key())
+			if !isValid(key) {
+				continue
+			}
+			count++
+			batch.Delete(key)
+			batchSize += len(key) + len(it.Value())
+			size += common.StorageSize(len(key) + len(it.Value()))
+			if batchSize > 25*1024*1024 {
+				if err := batch.Write(); err != nil {
+					return err
+				}
+				batch.Reset()
+				batchSize = 0
+			}
+			if time.Since(logged) > 8*time.Second {
+				log.Info("Deleting trie data", "count", count, "size", size, "elapsed", common.PrettyDuration(time.Since(start)))
+				logged = time.Now()
+			}
+		}
+
+		// delete left data
+		if batchSize > 0 {
+			if err := batch.Write(); err != nil {
+				return err
+			}
+			batch.Reset()
+		}
+		it.Release()
+	}
+
+	// delete metadata
+	batch.Delete([]byte("TrieSync"))
+	batch.Delete([]byte("TrieJournal"))
+	batch.Delete([]byte("LastStateID"))
+	if err := batch.Write(); err != nil {
+		return err
+	}
+	batch.Reset()
+
+	log.Info("Deleted trie data", "count", count, "size", size, "elapsed", common.PrettyDuration(time.Since(start)))
 	return nil
 }
 

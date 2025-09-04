@@ -144,6 +144,11 @@ var (
 		Usage:    "Delete snap and index data from the source database",
 		Category: flags.EthCategory,
 	}
+	DeleteTrieFlag = &cli.BoolFlag{
+		Name:     "deletetrie",
+		Usage:    "Delete trie data from the source database",
+		Category: flags.EthCategory,
+	}
 	AncientFlag = &flags.DirectoryFlag{
 		Name:     "datadir.ancient",
 		Usage:    "Root directory for ancient data (default = inside chaindata)",
