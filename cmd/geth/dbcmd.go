@@ -21,6 +21,8 @@ import (
 	"errors"
 	"fmt"
 	"hash/crc32"
+	"io"
+	"io/fs"
 	"math"
 	"math/rand"
 	"net/http"
@@ -1599,6 +1601,7 @@ func migrateDatabase(ctx *cli.Context) error {
 	deleteSnapIndex := ctx.Bool(utils.DeleteSnapIndexFlag.Name)
 	deleteTrie := ctx.Bool(utils.DeleteTrieFlag.Name)
 	migrateTrie := ctx.Bool(utils.MigrateTrieFlag.Name)
+	migrateFrom := ctx.String(utils.MigrateTrieFromFlag.Name)
 
 	if expandMode {
 		// Expand mode: expect [target-datadir] [version]
@@ -1642,6 +1645,13 @@ func migrateDatabase(ctx *cli.Context) error {
 	} else if migrateTrie {
 		log.Info("migrateDatabase with migrating trie data")
 		if err := migrateDBWithMigratingTrie(ctx); err != nil {
+			log.Error("failed to migrate database with migrating trie data", "error", err)
+			return err
+		}
+		return nil
+	} else if migrateFrom != "" {
+		log.Info("migrateDatabase from ", "path", migrateFrom)
+		if err := migrateDBFromSrc(ctx, migrateFrom); err != nil {
 			log.Error("failed to migrate database with migrating trie data", "error", err)
 			return err
 		}
@@ -1739,6 +1749,343 @@ func migrateDatabase(ctx *cli.Context) error {
 
 	// Start in-place migration
 	return performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB, sourceChainDataPath)
+}
+
+// migrateDBFromSrc migrates database from source path
+// migrateFrom is the chaindata path
+func migrateDBFromSrc(ctx *cli.Context, migrateFrom string) error {
+	cacheSize := ctx.Int(utils.CacheFlag.Name)
+	cacheDB := ctx.Int(utils.CacheDatabaseFlag.Name)
+	if !common.FileExist(migrateFrom) {
+		log.Error("source path not found", "path", migrateFrom)
+		return nil
+	}
+	if !common.FileExist(filepath.Join(migrateFrom, "ancient")) {
+		log.Error("source ancient path not found", "path", filepath.Join(migrateFrom, "ancient"))
+		return nil
+	}
+	fromdb, err := openTargetDatabase(migrateFrom, cacheSize*cacheDB*7/100, 64)
+	if err != nil {
+		return fmt.Errorf("failed to open source database: %v", err)
+	}
+	defer fromdb.Close()
+
+	// Create target stack using standard geth configuration (handles --datadir)
+	stack, cfg := makeConfigNode(ctx)
+	defer stack.Close()
+
+	// force to create multidbs or shardingdb
+	chainDB, err := initMultiDBs(stack, cfg, true)
+	if err != nil {
+		return fmt.Errorf("failed to init multidbs: %v", err)
+	}
+	defer chainDB.Close()
+
+	log.Info("Starting migration db from path", "source", migrateFrom, "target", stack.DataDir())
+
+	var (
+		wg           = sync.WaitGroup{}
+		batchChannel = make(chan []ethdb.Batch, 10)
+		errorChannel = make(chan error, 10)
+		writeRoutine = 5
+		flushStat    = &stat{}
+		flushLock    = sync.Mutex{}
+	)
+
+	for i := 0; i < writeRoutine; i++ {
+		wg.Add(1)
+		go func() {
+			logged := time.Now()
+			defer wg.Done()
+			for batches := range batchChannel {
+				start := time.Now()
+				batchSize := 0
+				for _, batch := range batches {
+					if batch.ValueSize() == 0 {
+						continue
+					}
+					batchSize += batch.ValueSize()
+					if err := batch.Write(); err != nil {
+						errorChannel <- fmt.Errorf("failed to write batch: %v", err)
+						return
+					}
+					batch.Reset()
+				}
+
+				flushLock.Lock()
+				flushStat.AddWithTime(batchSize, time.Since(start))
+				if time.Since(logged) > 8*time.Second {
+					log.Info("flushed batch", "flushStat", flushStat)
+					logged = time.Now()
+				}
+				flushLock.Unlock()
+			}
+		}()
+	}
+
+	var (
+		kvChannel = make(chan [][]byte, 10000)
+	)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		var (
+			cateStat   = &stat{}
+			chainStat  = &stat{}
+			stateStat  = &stat{}
+			snapStat   = &stat{}
+			indexStat  = &stat{}
+			chainBatch = chainDB.NewBatch()
+			stateBatch = chainDB.GetStateStore().NewBatch()
+			snapBatch  = chainDB.GetSnapStore().NewBatch()
+			indexBatch = chainDB.GetTxIndexStore().NewBatch()
+			batchSize  = 0
+			logged     = time.Now()
+		)
+		for kv := range kvChannel {
+			key := kv[0]
+			value := kv[1]
+			kvSize := len(key) + len(value)
+			batchSize += kvSize
+			record := time.Now()
+			category := categorizeDataByKey(key, value)
+			switch category {
+			case "state":
+				stateBatch.Put(key, value)
+				stateStat.Add(kvSize)
+			case "snapshot":
+				snapBatch.Put(key, value)
+				snapStat.Add(kvSize)
+			case "txindex":
+				indexBatch.Put(key, value)
+				indexStat.Add(kvSize)
+			default:
+				chainBatch.Put(key, value)
+				chainStat.Add(kvSize)
+			}
+			cateStat.AddWithTime(kvSize, time.Since(record))
+
+			if batchSize > 256*1024*1024 {
+				batchChannel <- []ethdb.Batch{chainBatch, stateBatch, snapBatch, indexBatch}
+				chainBatch = chainDB.NewBatch()
+				stateBatch = chainDB.GetStateStore().NewBatch()
+				snapBatch = chainDB.GetSnapStore().NewBatch()
+				indexBatch = chainDB.GetTxIndexStore().NewBatch()
+				batchSize = 0
+			}
+			if time.Since(logged) > 8*time.Second {
+				log.Info("categorized data",
+					"cate", cateStat,
+					"chain", chainStat,
+					"state", stateStat,
+					"snap", snapStat,
+					"index", indexStat,
+					"speed", fmt.Sprintf("%.2f MB/s", float64(batchSize)/time.Since(logged).Seconds()/1024/1024),
+					"elapsed", common.PrettyDuration(time.Since(logged)))
+				logged = time.Now()
+			}
+		}
+
+		// just sync write the last batch
+		if batchSize > 0 {
+			batchChannel <- []ethdb.Batch{chainBatch, stateBatch, snapBatch, indexBatch}
+		}
+		close(batchChannel)
+	}()
+
+	it := fromdb.NewIterator(nil, nil)
+	defer it.Release()
+
+	var (
+		sourceStat  = &stat{}
+		iterStat    = &stat{}
+		gcStat      = &stat{}
+		compactStat = &stat{}
+		logged      = time.Now()
+		start       = time.Now()
+		record      = time.Now()
+		compactCnt  = 1
+		compactSize = 500 * 1024 * 1024 * 1024
+	)
+	for it.Next() {
+		key := make([]byte, len(it.Key()))
+		value := make([]byte, len(it.Value()))
+		copy(key, it.Key())
+		copy(value, it.Value())
+		kvSize := len(key) + len(value)
+		iterStat.AddWithTime(kvSize, time.Since(record))
+		sourceStat.Add(kvSize)
+		kvChannel <- [][]byte{key, value}
+
+		if sourceStat.count%100000000 == 0 {
+			record = time.Now()
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			currentMemMB := m.Alloc / (1024 * 1024)
+
+			runtime.GC()
+
+			runtime.ReadMemStats(&m)
+			afterGCMemMB := m.Alloc / (1024 * 1024)
+			gcStat.AddWithTime(int(afterGCMemMB-currentMemMB), time.Since(record))
+		}
+
+		// compact in every compactSize...
+		if sourceStat.size >= common.StorageSize(compactSize*compactCnt) {
+			record = time.Now()
+			log.Info("source size is greater than 500GB, wait for batch channel to be empty and compacting...")
+			for len(batchChannel) > 0 || len(kvChannel) > 0 {
+				time.Sleep(1 * time.Second)
+			}
+			// just wait for write done and compact
+			time.Sleep(1 * time.Minute)
+			if err := multidbCompact(chainDB); err != nil {
+				return fmt.Errorf("failed to compact multidb: %v", err)
+			}
+			compactCnt++
+			compactStat.AddWithTime(compactSize, time.Since(record))
+		}
+		if time.Since(logged) > 8*time.Second {
+			log.Info("migrating database",
+				"iter", iterStat,
+				"compact", compactStat,
+				"gc", gcStat,
+				"source", sourceStat,
+				"speed", fmt.Sprintf("%.2f MB/s", float64(sourceStat.size)/time.Since(start).Seconds()/1024/1024),
+				"elapsed", common.PrettyDuration(time.Since(start)))
+			logged = time.Now()
+		}
+		record = time.Now()
+	}
+
+	close(kvChannel)
+	wg.Wait()
+
+	close(errorChannel)
+	for err := range errorChannel {
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := it.Error(); err != nil {
+		return fmt.Errorf("iterator error: %v", err)
+	}
+
+	log.Info("migrating database completed",
+		"source", sourceStat,
+		"speed", fmt.Sprintf("%.2f MB/s", float64(sourceStat.size)/time.Since(start).Seconds()/1024/1024),
+		"elapsed", common.PrettyDuration(time.Since(start)))
+
+	// copy ancient data from source to target
+	log.Info("copying ancient data from source to target")
+	srcAncient := filepath.Join(migrateFrom, "ancient")
+	dstAncient, err := chainDB.AncientDatadir()
+	if err != nil {
+		return fmt.Errorf("failed to get ancient directory: %v", err)
+	}
+	srcAncientChain := filepath.Join(srcAncient, rawdb.ChainFreezerName)
+	dstAncientChain := filepath.Join(dstAncient, rawdb.ChainFreezerName)
+	if err := os.MkdirAll(dstAncientChain, 0755); err != nil {
+		return fmt.Errorf("failed to create ancient chain directory: %v", err)
+	}
+	if err := copyTopFiles(srcAncientChain, dstAncientChain); err != nil {
+		return fmt.Errorf("failed to copy ancient chain directory: %v", err)
+	}
+
+	dstStateAncient, err := chainDB.GetStateStore().AncientDatadir()
+	if err != nil {
+		return fmt.Errorf("failed to get state ancient directory: %v", err)
+	}
+	srcAncientState := filepath.Join(srcAncient, rawdb.MerkleStateFreezerName)
+	dstAncientState := filepath.Join(dstStateAncient, rawdb.MerkleStateFreezerName)
+	if err := os.MkdirAll(dstAncientState, 0755); err != nil {
+		return fmt.Errorf("failed to create ancient state directory: %v", err)
+	}
+	if err := copyTopFiles(srcAncientState, dstAncientState); err != nil {
+		return fmt.Errorf("failed to copy ancient state directory: %v", err)
+	}
+	if err := multidbCompact(chainDB); err != nil {
+		return fmt.Errorf("failed to compact multidb: %v", err)
+	}
+	return nil
+}
+
+func multidbCompact(chainDB ethdb.Database) error {
+	log.Info("syncing chaindb...")
+	if err := chainDB.SyncKeyValue(); err != nil {
+		return fmt.Errorf("sync chaindb: %w", err)
+	}
+	if err := chainDB.GetStateStore().SyncKeyValue(); err != nil {
+		return fmt.Errorf("sync statedb: %w", err)
+	}
+	if err := chainDB.GetSnapStore().SyncKeyValue(); err != nil {
+		return fmt.Errorf("sync snapdb: %w", err)
+	}
+	if err := chainDB.GetTxIndexStore().SyncKeyValue(); err != nil {
+		return fmt.Errorf("sync indexdb: %w", err)
+	}
+	// compact the database
+	log.Info("compacting chaindb...")
+	if err := chainDB.Compact(nil, nil); err != nil {
+		return fmt.Errorf("failed to compact chaindb: %v", err)
+	}
+	log.Info("compacting statedb...")
+	if err := chainDB.GetStateStore().Compact(nil, nil); err != nil {
+		return fmt.Errorf("failed to compact statedb: %v", err)
+	}
+	log.Info("compacting snapdb...")
+	if err := chainDB.GetSnapStore().Compact(nil, nil); err != nil {
+		return fmt.Errorf("failed to compact snapdb: %v", err)
+	}
+	log.Info("compacting indexdb...")
+	if err := chainDB.GetTxIndexStore().Compact(nil, nil); err != nil {
+		return fmt.Errorf("failed to compact indexdb: %v", err)
+	}
+	return nil
+}
+
+func copyTopFiles(srcDir, dstDir string) error {
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if !e.Type().IsRegular() {
+			continue // 跳过子目录/链接等
+		}
+		info, err := e.Info()
+		if err != nil {
+			return err
+		}
+		src := filepath.Join(srcDir, e.Name())
+		dst := filepath.Join(dstDir, e.Name())
+		if err := copyFile(src, dst, info.Mode().Perm()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func copyFile(src, dst string, perm fs.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, perm)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, in)
+	if err != nil {
+		return err
+	}
+	return out.Sync()
 }
 
 func migrateDBWithMigratingTrie(ctx *cli.Context) error {
@@ -2220,6 +2567,10 @@ func isTrieKey(key, value []byte) bool {
 	case rawdb.IsAccountTrieNode(key):
 		return true
 	case rawdb.IsStorageTrieNode(key):
+		return true
+	case bytes.HasPrefix(key, rawdb.TrieNodeAccountPrefix) && len(key) < len(rawdb.TrieNodeAccountPrefix)+common.HashLength*2+2: // mock trie account
+		return true
+	case bytes.HasPrefix(key, rawdb.TrieNodeStoragePrefix) && len(key) >= len(rawdb.TrieNodeStoragePrefix)+common.HashLength+2 && len(key) < len(rawdb.TrieNodeStoragePrefix)+common.HashLength+common.HashLength*2+2: // mock trie storage
 		return true
 	case bytes.HasPrefix(key, []byte("X")): // Custom X prefix keys for testing
 		return true
@@ -3234,14 +3585,41 @@ func migrateDBWithSharding(ctx *cli.Context) error {
 	return nil
 }
 
+type PrettyTime time.Duration
+
+func (d PrettyTime) String() string {
+	t := time.Duration(d)
+	if t < time.Millisecond {
+		return fmt.Sprintf("%.2fus", float64(t.Nanoseconds())/1000)
+	}
+	if t < time.Second {
+		return fmt.Sprintf("%.2fms", float64(t.Microseconds())/1000)
+	}
+	return fmt.Sprintf("%.2fs", float64(t.Milliseconds())/1000)
+}
+
 type stat struct {
 	size  common.StorageSize
 	count uint64
+	time  time.Duration
 }
 
 func (s *stat) Add(size int) {
 	s.size += common.StorageSize(size)
 	s.count++
+}
+
+func (s *stat) AddWithTime(size int, time time.Duration) {
+	s.size += common.StorageSize(size)
+	s.time += time
+	s.count++
+}
+
+func (s *stat) String() string {
+	if s.time == 0 {
+		return fmt.Sprintf("%s|%d", s.size, s.count)
+	}
+	return fmt.Sprintf("%s|%d|%v|%v", s.size, s.count, PrettyTime(s.time), PrettyTime(s.time/time.Duration(s.count)))
 }
 
 // calculateXYShardIndex calculates which shard a X/Y prefixed key should go to
