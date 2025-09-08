@@ -1764,7 +1764,7 @@ func migrateDBFromSrc(ctx *cli.Context, migrateFrom string) error {
 		log.Error("source ancient path not found", "path", filepath.Join(migrateFrom, "ancient"))
 		return nil
 	}
-	fromdb, err := openTargetDatabase(migrateFrom, cacheSize*cacheDB*7/100, 64)
+	fromdb, err := openTargetDatabase(migrateFrom, cacheSize*cacheDB*7/100, 200000)
 	if err != nil {
 		return fmt.Errorf("failed to open source database: %v", err)
 	}
@@ -1858,6 +1858,9 @@ func migrateDBFromSrc(ctx *cli.Context, migrateFrom string) error {
 				snapBatch.Put(key, value)
 				snapStat.Add(kvSize)
 			case "txindex":
+				if len(key) == (1+common.HashLength)+2 {
+					continue
+				}
 				indexBatch.Put(key, value)
 				indexStat.Add(kvSize)
 			default:
@@ -2606,8 +2609,14 @@ func categorizeDataByKey(key, value []byte) string {
 	if bytes.HasPrefix(key, rawdb.SnapshotAccountPrefix) && len(key) == (len(rawdb.SnapshotAccountPrefix)+common.HashLength) {
 		return "snapshot"
 	}
+	if bytes.HasPrefix(key, rawdb.SnapshotAccountPrefix) && len(key) == (len(rawdb.SnapshotAccountPrefix)+common.HashLength)+2 {
+		return "snapshot"
+	}
 	// Snapshot data - storage snapshots
 	if bytes.HasPrefix(key, rawdb.SnapshotStoragePrefix) && len(key) == (len(rawdb.SnapshotStoragePrefix)+2*common.HashLength) {
+		return "snapshot"
+	}
+	if bytes.HasPrefix(key, rawdb.SnapshotStoragePrefix) && len(key) == (len(rawdb.SnapshotStoragePrefix)+2*common.HashLength)+2 {
 		return "snapshot"
 	}
 
@@ -2624,6 +2633,9 @@ func categorizeDataByKey(key, value []byte) string {
 
 	// Transaction index data
 	if bytes.HasPrefix(key, []byte("l")) && len(key) == (1+common.HashLength) { // txLookupPrefix
+		return "txindex"
+	}
+	if bytes.HasPrefix(key, []byte("l")) && len(key) == (1+common.HashLength)+2 { // txLookupPrefix
 		return "txindex"
 	}
 
