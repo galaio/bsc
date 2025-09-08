@@ -1785,9 +1785,9 @@ func migrateDBFromSrc(ctx *cli.Context, migrateFrom string) error {
 
 	var (
 		wg           = sync.WaitGroup{}
-		batchChannel = make(chan []ethdb.Batch, 10)
-		errorChannel = make(chan error, 10)
-		writeRoutine = 5
+		batchChannel = make(chan []ethdb.Batch, 50)
+		errorChannel = make(chan error, 50)
+		writeRoutine = 40
 		flushStat    = &stat{}
 		flushLock    = sync.Mutex{}
 	)
