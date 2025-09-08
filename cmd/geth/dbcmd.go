@@ -1785,17 +1785,17 @@ func migrateDBFromSrc(ctx *cli.Context, migrateFrom string) error {
 
 	var (
 		wg           = sync.WaitGroup{}
-		batchChannel = make(chan []ethdb.Batch, 50)
-		errorChannel = make(chan error, 50)
-		writeRoutine = 40
+		writeRoutine = 20
+		batchChannel = make(chan []ethdb.Batch, writeRoutine)
+		errorChannel = make(chan error, writeRoutine)
 		flushStat    = &stat{}
 		flushLock    = sync.Mutex{}
+		flushLogged  = time.Now()
 	)
 
 	for i := 0; i < writeRoutine; i++ {
 		wg.Add(1)
 		go func() {
-			logged := time.Now()
 			defer wg.Done()
 			for batches := range batchChannel {
 				start := time.Now()
@@ -1814,9 +1814,9 @@ func migrateDBFromSrc(ctx *cli.Context, migrateFrom string) error {
 
 				flushLock.Lock()
 				flushStat.AddWithTime(batchSize, time.Since(start))
-				if time.Since(logged) > 8*time.Second {
+				if time.Since(flushLogged) > 8*time.Second {
 					log.Info("flushed batch", "flushStat", flushStat)
-					logged = time.Now()
+					flushLogged = time.Now()
 				}
 				flushLock.Unlock()
 			}
