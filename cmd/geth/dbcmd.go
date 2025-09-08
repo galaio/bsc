@@ -1830,6 +1830,7 @@ func migrateDBFromSrc(ctx *cli.Context, migrateFrom string) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		start := time.Now()
 		var (
 			cateStat   = &stat{}
 			chainStat  = &stat{}
@@ -1884,8 +1885,8 @@ func migrateDBFromSrc(ctx *cli.Context, migrateFrom string) error {
 					"state", stateStat,
 					"snap", snapStat,
 					"index", indexStat,
-					"speed", fmt.Sprintf("%.2f MB/s", float64(batchSize)/time.Since(logged).Seconds()/1024/1024),
-					"elapsed", common.PrettyDuration(time.Since(logged)))
+					"speed", fmt.Sprintf("%.2f MB/s", float64(cateStat.size)/time.Since(start).Seconds()/1024/1024),
+					"elapsed", common.PrettyDuration(time.Since(start)))
 				logged = time.Now()
 			}
 		}
