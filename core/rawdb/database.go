@@ -807,9 +807,15 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		switch {
 		case bytes.HasPrefix(key, headerPrefix) && len(key) == (len(headerPrefix)+8+common.HashLength):
 			headers.Add(size)
+		case bytes.HasPrefix(key, headerPrefix) && len(key) == (len(headerPrefix)+8+common.HashLength)+2:
+			headers.Add(size)
 		case bytes.HasPrefix(key, blockBodyPrefix) && len(key) == (len(blockBodyPrefix)+8+common.HashLength):
 			bodies.Add(size)
+		case bytes.HasPrefix(key, blockBodyPrefix) && len(key) == (len(blockBodyPrefix)+8+common.HashLength)+2:
+			bodies.Add(size)
 		case bytes.HasPrefix(key, blockReceiptsPrefix) && len(key) == (len(blockReceiptsPrefix)+8+common.HashLength):
+			receipts.Add(size)
+		case bytes.HasPrefix(key, blockReceiptsPrefix) && len(key) == (len(blockReceiptsPrefix)+8+common.HashLength)+2:
 			receipts.Add(size)
 		case IsLegacyTrieNode(key, it.Value()):
 			legacyTries.Add(size)
@@ -825,17 +831,31 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			stateLookups.Add(size)
 		case IsAccountTrieNode(key):
 			accountTries.Add(size)
+		case bytes.HasPrefix(key, TrieNodeAccountPrefix) && len(key) >= len(TrieNodeAccountPrefix)+2 && len(key) < (len(TrieNodeAccountPrefix)+common.HashLength)+2:
+			accountTries.Add(size)
 		case IsStorageTrieNode(key):
+			storageTries.Add(size)
+		case bytes.HasPrefix(key, TrieNodeStoragePrefix) && len(key) >= (len(TrieNodeStoragePrefix)+common.HashLength)+2 && len(key) < (len(TrieNodeStoragePrefix)+2*common.HashLength)+2:
 			storageTries.Add(size)
 		case bytes.HasPrefix(key, CodePrefix) && len(key) == len(CodePrefix)+common.HashLength:
 			codes.Add(size)
+		case bytes.HasPrefix(key, CodePrefix) && len(key) == len(CodePrefix)+common.HashLength+2:
+			codes.Add(size)
 		case bytes.HasPrefix(key, txLookupPrefix) && len(key) == (len(txLookupPrefix)+common.HashLength):
+			txLookups.Add(size)
+		case bytes.HasPrefix(key, txLookupPrefix) && len(key) == (len(txLookupPrefix)+common.HashLength)+2:
 			txLookups.Add(size)
 		case bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength):
 			accountSnaps.Add(size)
 		case bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength):
 			storageSnaps.Add(size)
+		case bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength)+2:
+			accountSnaps.Add(size)
+		case bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength)+2:
+			storageSnaps.Add(size)
 		case bytes.HasPrefix(key, PreimagePrefix) && len(key) == (len(PreimagePrefix)+common.HashLength):
+			preimages.Add(size)
+		case bytes.HasPrefix(key, PreimagePrefix) && len(key) == (len(PreimagePrefix)+common.HashLength)+2:
 			preimages.Add(size)
 		case bytes.HasPrefix(key, configPrefix) && len(key) == (len(configPrefix)+common.HashLength):
 			metadata.Add(size)
