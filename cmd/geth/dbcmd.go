@@ -2478,7 +2478,7 @@ func migrateDBWithDeletingTrie(ctx *cli.Context) error {
 
 	dbs := []ethdb.KeyValueStore{}
 	for index := 0; index < 8; index++ {
-		db, err := openTargetDatabase(filepath.Join(triePath, fmt.Sprintf("shard%04d", i)), cacheSize*cacheDB*7/100, 64)
+		db, err := openTargetDatabase(filepath.Join(triePath, fmt.Sprintf("shard%04d", index)), cacheSize*cacheDB*7/100, 64)
 		if err != nil {
 			return fmt.Errorf("failed to open source chain database: %v", err)
 		}
@@ -2509,7 +2509,7 @@ func migrateDBWithDeletingTrie(ctx *cli.Context) error {
 	// 	}
 	// }
 
-	for index, db := range dbs {
+	for i, db := range dbs {
 		log.Info("deleting trie data", "shard", i)
 		if err := deleteTrieData(db); err != nil {
 			return fmt.Errorf("failed to delete trie data: %v", err)
