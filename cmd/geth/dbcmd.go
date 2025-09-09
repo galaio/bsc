@@ -342,6 +342,7 @@ of ancientStore, will also displays the reserved number of blocks in ancientStor
 			utils.DeleteSnapIndexFlag,
 			utils.DeleteTrieFlag,
 			utils.MigrateTrieFlag,
+			utils.MigrateShardingTrieFlag,
 			utils.MigrateTrieFromFlag,
 		}, utils.NetworkFlags),
 		Description: `This command migrates a single chaindb database to multi-database format.
@@ -1601,6 +1602,7 @@ func migrateDatabase(ctx *cli.Context) error {
 	deleteSnapIndex := ctx.Bool(utils.DeleteSnapIndexFlag.Name)
 	deleteTrie := ctx.Bool(utils.DeleteTrieFlag.Name)
 	migrateTrie := ctx.Bool(utils.MigrateTrieFlag.Name)
+	migrateShardingTrie := ctx.Bool(utils.MigrateShardingTrieFlag.Name)
 	migrateFrom := ctx.String(utils.MigrateTrieFromFlag.Name)
 
 	if expandMode {
@@ -1645,6 +1647,13 @@ func migrateDatabase(ctx *cli.Context) error {
 	} else if migrateTrie {
 		log.Info("migrateDatabase with migrating trie data")
 		if err := migrateDBWithMigratingTrie(ctx); err != nil {
+			log.Error("failed to migrate database with migrating trie data", "error", err)
+			return err
+		}
+		return nil
+	} else if migrateShardingTrie {
+		log.Info("migrateDatabase with migrating trie data")
+		if err := migrateTrieFromShardingDB(ctx); err != nil {
 			log.Error("failed to migrate database with migrating trie data", "error", err)
 			return err
 		}
@@ -2268,7 +2277,7 @@ func migrateTrieFromShardingDB(ctx *cli.Context) error {
 	}
 	defer chainDB.Close()
 
-	log.Info("Starting complete database migration", "source", migrateTrieFrom, "target", stack.DataDir())
+	log.Info("Starting database migration from sharding database", "source", migrateTrieFrom, "target", stack.DataDir())
 
 	var (
 		stateDB      = chainDB.GetStateStore()
