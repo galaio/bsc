@@ -2236,6 +2236,150 @@ func migrateDBWithMigratingTrie(ctx *cli.Context) error {
 	return nil
 }
 
+func migrateTrieFromShardingDB(ctx *cli.Context) error {
+	cacheSize := ctx.Int(utils.CacheFlag.Name)
+	cacheDB := ctx.Int(utils.CacheDatabaseFlag.Name)
+	migrateTrieFrom := ctx.String(utils.MigrateTrieFromFlag.Name)
+	checkTrieFrom := common.FileExist(migrateTrieFrom)
+	if !checkTrieFrom {
+		log.Error("trie data not found", "path", migrateTrieFrom)
+		return nil
+	}
+
+	var shards []ethdb.KeyValueStore
+	var shardNum = 8
+	for index := 0; index < shardNum; index++ {
+		sahrdPath := filepath.Join(migrateTrieFrom, fmt.Sprintf("shard%04d", index))
+		db, err := openTargetDatabase(sahrdPath, cacheSize*cacheDB*7/shardNum/100, 64)
+		if err != nil {
+			return fmt.Errorf("failed to open source trie database: %v", err)
+		}
+		defer db.Close()
+		shards = append(shards, db)
+	}
+
+	// Create target stack using standard geth configuration (handles --datadir)
+	stack, cfg := makeConfigNode(ctx)
+	defer stack.Close()
+
+	chainDB, err := initMultiDBs(stack, cfg, true)
+	if err != nil {
+		return fmt.Errorf("failed to init multidbs: %v", err)
+	}
+	defer chainDB.Close()
+
+	log.Info("Starting complete database migration", "source", migrateTrieFrom, "target", stack.DataDir())
+
+	var (
+		stateDB      = chainDB.GetStateStore()
+		batch        = stateDB.NewBatch()
+		start        = time.Now()
+		count        int64
+		size         common.StorageSize
+		batchSize    = 0
+		logged       = time.Now()
+		wg           = sync.WaitGroup{}
+		batchChannel = make(chan ethdb.Batch, 10)
+		errorChannel = make(chan error, 10)
+		writeCnt     = 5
+	)
+
+	for index := 0; index < writeCnt; index++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for batch := range batchChannel {
+				if err := batch.Write(); err != nil {
+					errorChannel <- fmt.Errorf("failed to write batch: %v", err)
+				}
+				batch.Reset()
+			}
+		}()
+	}
+
+	for _, shard := range shards {
+		it := shard.NewIterator(nil, nil)
+
+		for it.Next() {
+			key := make([]byte, len(it.Key()))
+			value := make([]byte, len(it.Value()))
+			copy(key, it.Key())
+			copy(value, it.Value())
+
+			count++
+			batch.Put(key, value)
+			keyValueSize := len(key) + len(value)
+			batchSize += keyValueSize
+			size += common.StorageSize(keyValueSize)
+
+			if batchSize > 256*1024*1024 {
+				batchChannel <- batch
+				batch = stateDB.NewBatch()
+				batchSize = 0
+				select {
+				case err := <-errorChannel:
+					return fmt.Errorf("failed to write batch: %v", err)
+				default:
+					// Continue processing
+				}
+			}
+			if count%10000000 == 0 {
+				start := time.Now()
+				var m runtime.MemStats
+				runtime.ReadMemStats(&m)
+				currentMemMB := m.Alloc / (1024 * 1024)
+
+				runtime.GC()
+
+				runtime.ReadMemStats(&m)
+				afterGCMemMB := m.Alloc / (1024 * 1024)
+
+				log.Info("🧠 Memory monitoring & GC",
+					"beforeGC_MB", currentMemMB,
+					"afterGC_MB", afterGCMemMB,
+					"duration", time.Since(start))
+			}
+			if time.Since(logged) > 8*time.Second {
+				log.Info("migrating database",
+					"count", count,
+					"size", size,
+					"speed", fmt.Sprintf("%.2f MB/s", float64(size)/time.Since(start).Seconds()/1024/1024),
+					"elapsed", common.PrettyDuration(time.Since(start)))
+				logged = time.Now()
+			}
+		}
+
+		// just sync write the last batch
+		if batch.ValueSize() > 0 {
+			if err := batch.Write(); err != nil {
+				return fmt.Errorf("failed to write final batch: %v", err)
+			}
+		}
+
+		if err := it.Error(); err != nil {
+			return fmt.Errorf("iterator error: %v", err)
+		}
+		it.Release()
+	}
+
+	close(batchChannel)
+	wg.Wait()
+
+	close(errorChannel)
+	for err := range errorChannel {
+		if err != nil {
+			return err
+		}
+	}
+
+	log.Info("Database migration completed successfully",
+		"total_count", count,
+		"total_size", size,
+		"average_speed", fmt.Sprintf("%.2f MB/s", float64(size)/time.Since(start).Seconds()/1024/1024),
+		"elapsed", common.PrettyDuration(time.Since(start)))
+	return nil
+}
+
 func migrateDBWithDeletingSnapIndex(ctx *cli.Context) error {
 	cacheSize := ctx.Int(utils.CacheFlag.Name)
 	cacheDB := ctx.Int(utils.CacheDatabaseFlag.Name)
@@ -2324,7 +2468,7 @@ func migrateDBWithDeletingTrie(ctx *cli.Context) error {
 	log.Info("Starting delete sharding trie", "source", triePath)
 
 	dbs := []ethdb.KeyValueStore{}
-	for i := 0; i < 8; i++ {
+	for index := 0; index < 8; index++ {
 		db, err := openTargetDatabase(filepath.Join(triePath, fmt.Sprintf("shard%04d", i)), cacheSize*cacheDB*7/100, 64)
 		if err != nil {
 			return fmt.Errorf("failed to open source chain database: %v", err)
@@ -2356,7 +2500,7 @@ func migrateDBWithDeletingTrie(ctx *cli.Context) error {
 	// 	}
 	// }
 
-	for i, db := range dbs {
+	for index, db := range dbs {
 		log.Info("deleting trie data", "shard", i)
 		if err := deleteTrieData(db); err != nil {
 			return fmt.Errorf("failed to delete trie data: %v", err)
@@ -2768,7 +2912,7 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 
 	// Start 20 unified async writer goroutines using thread pool
 	log.Info("🚀 Starting async writer goroutines", "threadCount", threadPoolSize)
-	for i := 0; i < threadPoolSize; i++ {
+	for index := 0; index < threadPoolSize; index++ {
 		wg.Add(1)
 		gopool.Submit(func() {
 			defer wg.Done()
@@ -3665,7 +3809,7 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 
 	// Start 20 async writer goroutines
 	log.Info("🚀 Starting async writer goroutines", "threadCount", threadPoolSize)
-	for i := 0; i < threadPoolSize; i++ {
+	for index := 0; index < threadPoolSize; index++ {
 		wg.Add(1)
 		gopool.Submit(func() {
 			defer wg.Done()
