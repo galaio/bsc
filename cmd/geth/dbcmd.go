@@ -1595,7 +1595,7 @@ func inspectHistory(ctx *cli.Context) error {
 }
 
 func resetCanonicalDatabase(ctx *cli.Context) error {
-	if ctx.NArg() != 2 {
+	if ctx.NArg() != 3 {
 		return fmt.Errorf("required arguments: %v", ctx.Command.ArgsUsage)
 	}
 	blockHash := common.HexToHash(ctx.Args().Get(0))
