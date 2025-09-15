@@ -343,7 +343,7 @@ of ancientStore, will also displays the reserved number of blocks in ancientStor
 			utils.DeleteSnapIndexFlag,
 			utils.DeleteTrieFlag,
 			utils.MigrateTrieFlag,
-			utils.MigrateShardingTrieFlag,
+			utils.MergeFromShardingFlag,
 			utils.MigrateTrieFromFlag,
 		}, utils.NetworkFlags),
 		Description: `This command migrates a single chaindb database to multi-database format.
@@ -1658,7 +1658,7 @@ func migrateDatabase(ctx *cli.Context) error {
 	deleteSnapIndex := ctx.Bool(utils.DeleteSnapIndexFlag.Name)
 	deleteTrie := ctx.Bool(utils.DeleteTrieFlag.Name)
 	migrateTrie := ctx.Bool(utils.MigrateTrieFlag.Name)
-	migrateShardingTrie := ctx.Bool(utils.MigrateShardingTrieFlag.Name)
+	mergeFromSharding := ctx.Bool(utils.MergeFromShardingFlag.Name)
 	migrateFrom := ctx.String(utils.MigrateTrieFromFlag.Name)
 
 	if expandMode {
@@ -1707,10 +1707,10 @@ func migrateDatabase(ctx *cli.Context) error {
 			return err
 		}
 		return nil
-	} else if migrateShardingTrie {
-		log.Info("migrateDatabase with migrating trie data")
-		if err := migrateTrieFromShardingDB(ctx); err != nil {
-			log.Error("failed to migrate database with migrating trie data", "error", err)
+	} else if mergeFromSharding {
+		log.Info("migrateDatabase with merging data from sharding db")
+		if err := mergeKVFromShardingDB(ctx); err != nil {
+			log.Error("failed to migrate database with merging data from sharding db", "error", err)
 			return err
 		}
 		return nil
@@ -2301,7 +2301,7 @@ func migrateDBWithMigratingTrie(ctx *cli.Context) error {
 	return nil
 }
 
-func migrateTrieFromShardingDB(ctx *cli.Context) error {
+func mergeKVFromShardingDB(ctx *cli.Context) error {
 	cacheSize := ctx.Int(utils.CacheFlag.Name)
 	cacheDB := ctx.Int(utils.CacheDatabaseFlag.Name)
 	migrateTrieFrom := ctx.String(utils.MigrateTrieFromFlag.Name)
@@ -2327,7 +2327,7 @@ func migrateTrieFromShardingDB(ctx *cli.Context) error {
 	stack, cfg := makeConfigNode(ctx)
 	defer stack.Close()
 
-	chainDB, err := initMultiDBs(stack, cfg, true)
+	chainDB, err := initMultiDBs(stack, cfg, false)
 	if err != nil {
 		return fmt.Errorf("failed to init multidbs: %v", err)
 	}
@@ -2336,13 +2336,6 @@ func migrateTrieFromShardingDB(ctx *cli.Context) error {
 	log.Info("Starting database migration from sharding database", "source", migrateTrieFrom, "target", stack.DataDir())
 
 	var (
-		stateDB      = chainDB.GetStateStore()
-		batch        = stateDB.NewBatch()
-		start        = time.Now()
-		count        int64
-		size         common.StorageSize
-		batchSize    = 0
-		logged       = time.Now()
 		wg           = sync.WaitGroup{}
 		batchChannel = make(chan ethdb.Batch, 10)
 		errorChannel = make(chan error, 10)
@@ -2362,24 +2355,30 @@ func migrateTrieFromShardingDB(ctx *cli.Context) error {
 		}()
 	}
 
-	for _, shard := range shards {
-		it := shard.NewIterator(nil, nil)
+	var (
+		start     = time.Now()
+		rstat     = &stat{}
+		batchSize = 0
+		logged    = time.Now()
+	)
 
+	for _, shard := range shards {
+		batch := chainDB.NewBatch()
+		it := shard.NewIterator(nil, nil)
 		for it.Next() {
 			key := make([]byte, len(it.Key()))
 			value := make([]byte, len(it.Value()))
 			copy(key, it.Key())
 			copy(value, it.Value())
 
-			count++
 			batch.Put(key, value)
 			keyValueSize := len(key) + len(value)
 			batchSize += keyValueSize
-			size += common.StorageSize(keyValueSize)
+			rstat.Add(keyValueSize)
 
 			if batchSize > 256*1024*1024 {
 				batchChannel <- batch
-				batch = stateDB.NewBatch()
+				batch = chainDB.NewBatch()
 				batchSize = 0
 				select {
 				case err := <-errorChannel:
@@ -2388,7 +2387,7 @@ func migrateTrieFromShardingDB(ctx *cli.Context) error {
 					// Continue processing
 				}
 			}
-			if count%10000000 == 0 {
+			if rstat.count%100000000 == 0 {
 				start := time.Now()
 				var m runtime.MemStats
 				runtime.ReadMemStats(&m)
@@ -2406,9 +2405,8 @@ func migrateTrieFromShardingDB(ctx *cli.Context) error {
 			}
 			if time.Since(logged) > 8*time.Second {
 				log.Info("migrating database",
-					"count", count,
-					"size", size,
-					"speed", fmt.Sprintf("%.2f MB/s", float64(size)/time.Since(start).Seconds()/1024/1024),
+					"read", rstat,
+					"speed", fmt.Sprintf("%.2f MB/s", float64(rstat.size)/time.Since(start).Seconds()/1024/1024),
 					"elapsed", common.PrettyDuration(time.Since(start)))
 				logged = time.Now()
 			}
@@ -2438,9 +2436,8 @@ func migrateTrieFromShardingDB(ctx *cli.Context) error {
 	}
 
 	log.Info("Database migration completed successfully",
-		"total_count", count,
-		"total_size", size,
-		"average_speed", fmt.Sprintf("%.2f MB/s", float64(size)/time.Since(start).Seconds()/1024/1024),
+		"read", rstat,
+		"speed", fmt.Sprintf("%.2f MB/s", float64(rstat.size)/time.Since(start).Seconds()/1024/1024),
 		"elapsed", common.PrettyDuration(time.Since(start)))
 	return nil
 }

@@ -154,9 +154,9 @@ var (
 		Usage:    "Migrate trie data from the source database",
 		Category: flags.EthCategory,
 	}
-	MigrateShardingTrieFlag = &cli.BoolFlag{
-		Name:     "migrateshardingtrie",
-		Usage:    "Migrate sharding trie data from the source database",
+	MergeFromShardingFlag = &cli.BoolFlag{
+		Name:     "mergefromsharding",
+		Usage:    "Merge data from sharding db",
 		Category: flags.EthCategory,
 	}
 	MigrateTrieFromFlag = &cli.StringFlag{
