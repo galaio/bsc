@@ -1921,7 +1921,7 @@ func migrateDBFromSrc(ctx *cli.Context, migrateFrom string) error {
 				// stateBatch.Put(key, value)
 				stateStat.Add(kvSize)
 			case "snapshot":
-				// snapBatch.Put(key, value)
+				snapBatch.Put(key, value)
 				snapStat.Add(kvSize)
 			case "txindex":
 				if len(key) == (1+common.HashLength)+2 {
@@ -1930,7 +1930,7 @@ func migrateDBFromSrc(ctx *cli.Context, migrateFrom string) error {
 				// indexBatch.Put(key, value)
 				indexStat.Add(kvSize)
 			default:
-				chainBatch.Put(key, value)
+				// chainBatch.Put(key, value)
 				chainStat.Add(kvSize)
 			}
 			cateStat.AddWithTime(kvSize, time.Since(record))
