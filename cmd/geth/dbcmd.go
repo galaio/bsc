@@ -111,6 +111,7 @@ Remove blockchain and state databases`,
 			dbTrieDeleteCmd,
 			dbInspectHistoryCmd,
 			dbMigrateCmd,
+			dbResetCanonicalCmd,
 		},
 	}
 	dbInspectCmd = &cli.Command{
@@ -368,6 +369,18 @@ EXPAND mode requirements:
   - Use regular migrate mode first to prepare the target database structure
  
 WARNING: This operation may take a very long time to finish for large databases (2TB+).`,
+	}
+	dbResetCanonicalCmd = &cli.Command{
+		Action:    resetCanonicalDatabase,
+		Name:      "reset-canonical",
+		Usage:     "Reset canonical database",
+		ArgsUsage: "<blockHash> <blockNumber> <chainDataDir>",
+		Flags: slices.Concat([]cli.Flag{
+			utils.DataDirFlag,
+		}, utils.NetworkFlags),
+		Description: `
+		This command resets the canonical database.
+		`,
 	}
 )
 
@@ -1581,6 +1594,47 @@ func inspectHistory(ctx *cli.Context) error {
 	return inspectStorage(triedb, start, end, address, slot, ctx.Bool("raw"))
 }
 
+func resetCanonicalDatabase(ctx *cli.Context) error {
+	if ctx.NArg() != 2 {
+		return fmt.Errorf("required arguments: %v", ctx.Command.ArgsUsage)
+	}
+	blockHash := common.HexToHash(ctx.Args().Get(0))
+	if blockHash == (common.Hash{}) {
+		return fmt.Errorf("block hash cannot be empty")
+	}
+	blockNumber, err := strconv.ParseUint(ctx.Args().Get(1), 10, 64)
+	if err != nil {
+		return fmt.Errorf("failed to parse block hash: %v", err)
+	}
+	chainDataDir := ctx.Args().Get(2)
+	if chainDataDir == "" {
+		return fmt.Errorf("chain data directory cannot be empty")
+	}
+
+	db, err := openTargetDatabase(chainDataDir, 1024, 1024)
+	if err != nil {
+		return fmt.Errorf("failed to open target database: %v", err)
+	}
+	defer db.Close()
+
+	block := rawdb.ReadBlock(db, blockHash, blockNumber)
+	if block == nil {
+		return fmt.Errorf("block not found")
+	}
+
+	blockBatch := db.NewBatch()
+	rawdb.WriteCanonicalHash(blockBatch, block.Hash(), block.NumberU64())
+	rawdb.WriteHeadHeaderHash(blockBatch, block.Hash())
+	rawdb.WriteHeadBlockHash(blockBatch, block.Hash())
+	rawdb.WriteHeadFastBlockHash(blockBatch, block.Hash())
+	// Flush the whole batch into the disk, exit the node if failed
+	if err := blockBatch.Write(); err != nil {
+		log.Crit("Failed to update chain indexes and markers in block db", "err", err)
+	}
+
+	return nil
+}
+
 // migrateDatabase migrates a single database to multi-database format
 func migrateDatabase(ctx *cli.Context) error {
 	// 启动pprof HTTP服务器
@@ -1862,16 +1916,16 @@ func migrateDBFromSrc(ctx *cli.Context, migrateFrom string) error {
 			category := categorizeDataByKey(key, value)
 			switch category {
 			case "state":
-				stateBatch.Put(key, value)
+				// stateBatch.Put(key, value)
 				stateStat.Add(kvSize)
 			case "snapshot":
-				snapBatch.Put(key, value)
+				// snapBatch.Put(key, value)
 				snapStat.Add(kvSize)
 			case "txindex":
 				if len(key) == (1+common.HashLength)+2 {
 					continue
 				}
-				indexBatch.Put(key, value)
+				// indexBatch.Put(key, value)
 				indexStat.Add(kvSize)
 			default:
 				chainBatch.Put(key, value)
