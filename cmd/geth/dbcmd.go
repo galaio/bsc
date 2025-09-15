@@ -2439,6 +2439,11 @@ func mergeKVFromShardingDB(ctx *cli.Context) error {
 		"read", rstat,
 		"speed", fmt.Sprintf("%.2f MB/s", float64(rstat.size)/time.Since(start).Seconds()/1024/1024),
 		"elapsed", common.PrettyDuration(time.Since(start)))
+
+	log.Info("compacting chaindb...")
+	if err := chainDB.Compact(nil, nil); err != nil {
+		return fmt.Errorf("failed to compact chaindb: %v", err)
+	}
 	return nil
 }
 
