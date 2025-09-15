@@ -1611,6 +1611,7 @@ func resetCanonicalDatabase(ctx *cli.Context) error {
 		return fmt.Errorf("chain data directory cannot be empty")
 	}
 
+	log.Info("resetting canonical database", "blockHash", blockHash, "blockNumber", blockNumber, "chainDataDir", chainDataDir)
 	db, err := openTargetDatabase(chainDataDir, 1024, 1024)
 	if err != nil {
 		return fmt.Errorf("failed to open target database: %v", err)
@@ -1621,6 +1622,7 @@ func resetCanonicalDatabase(ctx *cli.Context) error {
 	if block == nil {
 		return fmt.Errorf("block not found")
 	}
+	log.Info("block found", "blockHash", block.Hash(), "blockNumber", block.NumberU64())
 
 	blockBatch := db.NewBatch()
 	rawdb.WriteCanonicalHash(blockBatch, block.Hash(), block.NumberU64())
