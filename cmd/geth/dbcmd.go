@@ -341,6 +341,7 @@ of ancientStore, will also displays the reserved number of blocks in ancientStor
 			utils.CacheDatabaseFlag,
 			utils.ExpandModeFlag,
 			utils.DeleteSnapIndexFlag,
+			utils.MigrateSnapFlag,
 			utils.DeleteTrieFlag,
 			utils.MigrateTrieFlag,
 			utils.MergeFromShardingFlag,
@@ -1655,6 +1656,7 @@ func migrateDatabase(ctx *cli.Context) error {
 
 	// Parse arguments based on expand mode
 	expandMode := ctx.Bool(utils.ExpandModeFlag.Name)
+	migrateSnap := ctx.Bool(utils.MigrateSnapFlag.Name)
 	deleteSnapIndex := ctx.Bool(utils.DeleteSnapIndexFlag.Name)
 	deleteTrie := ctx.Bool(utils.DeleteTrieFlag.Name)
 	migrateTrie := ctx.Bool(utils.MigrateTrieFlag.Name)
@@ -1686,6 +1688,13 @@ func migrateDatabase(ctx *cli.Context) error {
 		}
 		os.Setenv("GODEBUG", "randseednop=0")
 		rand.Seed(int64(version))
+	} else if migrateSnap {
+		log.Info("migrateDatabase with migrating snap data")
+		if err := migrateSnapFromSrc(ctx); err != nil {
+			log.Error("failed to migrate database with migrating snap data", "error", err)
+			return err
+		}
+		return nil
 	} else if deleteSnapIndex {
 		log.Info("migrateDatabase with deleting snap and index data")
 		if err := migrateDBWithDeletingSnapIndex(ctx); err != nil {
@@ -1814,6 +1823,136 @@ func migrateDatabase(ctx *cli.Context) error {
 
 	// Start in-place migration
 	return performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB, sourceChainDataPath)
+}
+
+func migrateSnapFromSrc(ctx *cli.Context) error {
+	cacheSize := ctx.Int(utils.CacheFlag.Name)
+	cacheDB := ctx.Int(utils.CacheDatabaseFlag.Name)
+	migrateFrom := ctx.String(utils.MigrateTrieFromFlag.Name)
+	if !common.FileExist(migrateFrom) {
+		log.Error("source path not found", "path", migrateFrom)
+		return nil
+	}
+	if !common.FileExist(filepath.Join(migrateFrom, "ancient")) {
+		log.Error("source ancient path not found", "path", filepath.Join(migrateFrom, "ancient"))
+		return nil
+	}
+	fromdb, err := openTargetDatabase(migrateFrom, cacheSize*cacheDB*7/100, 200000)
+	if err != nil {
+		return fmt.Errorf("failed to open source database: %v", err)
+	}
+	defer fromdb.Close()
+
+	// Create target stack using standard geth configuration (handles --datadir)
+	stack, cfg := makeConfigNode(ctx)
+	defer stack.Close()
+
+	// force to create multidbs or shardingdb
+	chainDB, err := initMultiDBs(stack, cfg, false)
+	if err != nil {
+		return fmt.Errorf("failed to init multidbs: %v", err)
+	}
+	defer chainDB.Close()
+
+	log.Info("Starting migration db from path", "source", migrateFrom, "target", stack.DataDir())
+	var (
+		batch     = chainDB.NewBatch()
+		start     = time.Now()
+		logged    = time.Now()
+		rstat     = &stat{}
+		snapStat  = &stat{}
+		otherStat = &stat{}
+		batchSize = 0
+	)
+
+	prefixesToDelete := []struct {
+		prefix []byte
+		name   string
+	}{
+		{rawdb.SnapshotAccountPrefix, "account snapshots"},
+		{rawdb.SnapshotStoragePrefix, "storage snapshots"},
+	}
+
+	for _, item := range prefixesToDelete {
+		it := fromdb.NewIterator(item.prefix, nil)
+		log.Info("deleting", "type", item.name, "prefix", string(item.prefix))
+
+		for it.Next() {
+			key := make([]byte, len(it.Key()))
+			value := make([]byte, len(it.Value()))
+			copy(key, it.Key())
+			copy(value, it.Value())
+			kvSize := len(key) + len(value)
+			batchSize += kvSize
+			rstat.Add(kvSize)
+			category := categorizeDataByKey(key, value)
+			switch category {
+			case "snapshot":
+				if err := batch.Put(key, value); err != nil {
+					it.Release()
+					return err
+				}
+				snapStat.Add(kvSize)
+			default:
+				otherStat.Add(kvSize)
+			}
+
+			if batchSize > 256*1024*1024 {
+				if err := batch.Write(); err != nil {
+					it.Release()
+					return err
+				}
+				batch.Reset()
+				batchSize = 0
+			}
+
+			if time.Since(logged) > 8*time.Second {
+				log.Info("deleting snapshot data progress", "rstat", rstat, "snapStat", snapStat, "otherStat", otherStat, "elapsed", common.PrettyDuration(time.Since(start)))
+				logged = time.Now()
+			}
+		}
+		it.Release()
+	}
+
+	snapshotMetadataKeys := [][]byte{
+		[]byte("SnapshotRoot"),
+		[]byte("SnapshotJournal"),
+		[]byte("SnapshotGenerator"),
+		[]byte("SnapshotRecovery"),
+		[]byte("SnapshotSyncStatus"),
+		[]byte("SnapSyncStatus"), // found in schema.go
+	}
+
+	for _, rk := range snapshotMetadataKeys {
+		rv, err := fromdb.Get(rk)
+		if err != nil {
+			return err
+		}
+		key := make([]byte, len(rk))
+		value := make([]byte, len(rv))
+		copy(key, rk)
+		copy(value, rv)
+		if err := batch.Put(key, value); err != nil {
+			return err
+		}
+		kvSize := len(key) + len(value)
+		snapStat.Add(kvSize)
+	}
+
+	if batch.ValueSize() > 0 {
+		if err := batch.Write(); err != nil {
+			return err
+		}
+	}
+
+	log.Info("migrate snapshot data completed", "rstat", rstat, "snapStat", snapStat, "otherStat", otherStat, "elapsed", common.PrettyDuration(time.Since(start)))
+
+	log.Info("compacting chaindb...")
+	if err := chainDB.Compact(nil, nil); err != nil {
+		return fmt.Errorf("failed to compact chaindb: %v", err)
+	}
+	return nil
+
 }
 
 // migrateDBFromSrc migrates database from source path

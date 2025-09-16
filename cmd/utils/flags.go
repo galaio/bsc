@@ -144,6 +144,11 @@ var (
 		Usage:    "Delete snap and index data from the source database",
 		Category: flags.EthCategory,
 	}
+	MigrateSnapFlag = &cli.BoolFlag{
+		Name:     "migratesnap",
+		Usage:    "Migrate snap data from the source database",
+		Category: flags.EthCategory,
+	}
 	DeleteTrieFlag = &cli.BoolFlag{
 		Name:     "deletetrie",
 		Usage:    "Delete trie data from the source database",
