@@ -461,6 +461,7 @@ func createNodeConfig(baseConfig gethConfig, ip string, port int, enodes []*enod
 		baseConfig.Node.P2P.StaticNodes = connectEnodes
 	} else {
 		baseConfig.Node.P2P.BootstrapNodes = connectEnodes
+		baseConfig.Node.P2P.StaticNodes = connectEnodes
 	}
 	return baseConfig
 }

@@ -19,6 +19,7 @@ package core
 import (
 	crand "crypto/rand"
 	"errors"
+	"fmt"
 	"math"
 	"math/big"
 	mrand "math/rand"
@@ -88,6 +89,9 @@ func (f *ForkChoice) ReorgNeeded(current *types.Header, extern *types.Header) (b
 		}
 		externTd = new(big.Int).Add(ptd, extern.Difficulty)
 	}
+	log.Info("ReorgNeededWithFastFinality",
+		"current", fmt.Sprintf("(%v, %v, %v)", current.Number, current.Hash(), localTD),
+		"header", fmt.Sprintf("(%v, %v, %v)", extern.Number, extern.Hash(), externTd))
 	// Accept the new header as the chain head if the transition
 	// is already triggered. We assume all the headers after the
 	// transition come from the trusted consensus layer.
@@ -139,6 +143,9 @@ func (f *ForkChoice) ReorgNeededWithFastFinality(current *types.Header, header *
 	if f.chain.Config().IsPlato(current.Number) {
 		curJustifiedNumber = f.chain.GetJustifiedNumber(current)
 	}
+	log.Info("ReorgNeededWithFastFinality",
+		"current", fmt.Sprintf("(%v, %v, %v)", current.Number, current.Hash(), curJustifiedNumber),
+		"header", fmt.Sprintf("(%v, %v, %v)", header.Number, header.Hash(), justifiedNumber))
 	if justifiedNumber == curJustifiedNumber {
 		return f.ReorgNeeded(current, header)
 	}
