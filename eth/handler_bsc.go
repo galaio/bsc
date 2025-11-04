@@ -31,8 +31,10 @@ func (h *bscHandler) RunPeer(peer *bsc.Peer, hand bsc.Handler) error {
 			wait <- nil
 		}
 		ps.lock.Unlock()
+		peer.Log().Trace("bsc handshake", "err", err, "peer", peer.ID())
 		return err
 	}
+	peer.Log().Trace("bsc handshake success", "peer", peer.ID())
 	return (*handler)(h).runBscExtension(peer, hand)
 }
 

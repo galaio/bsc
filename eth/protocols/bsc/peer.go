@@ -109,6 +109,7 @@ func (p *Peer) markVotes(votes []*types.VoteEnvelope) {
 func (p *Peer) sendVotes(votes []*types.VoteEnvelope) error {
 	// Mark all the votes as known, but ensure we don't overflow our limits
 	p.markVotes(votes)
+	p.Log().Trace("send votes to", "count", len(votes), "peer", p.ID())
 	return p2p.Send(p.rw, VotesMsg, &VotesPacket{votes})
 }
 

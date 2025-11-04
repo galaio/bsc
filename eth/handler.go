@@ -1063,7 +1063,10 @@ func (h *handler) BroadcastVote(vote *types.VoteEnvelope) {
 		_, peerTD := peer.Head()
 		deltaTD := new(big.Int).Abs(new(big.Int).Sub(currentTD, peerTD))
 		if deltaTD.Cmp(big.NewInt(deltaTdThreshold)) <= 0 {
+			peer.Log().Trace("vote broadcast sending", "deltaTD", deltaTD, "peer", peer.ID(), "currentTD", currentTD, "peerTD", peerTD, "bsc", peer.bscExt != nil)
 			voteMap[peer] = vote
+		} else {
+			peer.Log().Trace("vote broadcast skipping", "deltaTD", deltaTD, "peer", peer.ID(), "currentTD", currentTD, "peerTD", peerTD, "bsc", peer.bscExt != nil)
 		}
 	}
 

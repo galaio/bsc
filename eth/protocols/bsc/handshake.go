@@ -26,9 +26,11 @@ func (p *Peer) Handshake() error {
 			ProtocolVersion: p.version,
 			Extra:           defaultExtra,
 		})
+		p.Log().Trace("bsc send handshake", "cap", cap, "peer", p.ID())
 	})
 	gopool.Submit(func() {
 		errc <- p.readCap(&cap)
+		p.Log().Trace("bsc received handshake", "cap", cap, "peer", p.ID())
 	})
 	timeout := time.NewTimer(handshakeTimeout)
 	defer timeout.Stop()
@@ -36,9 +38,11 @@ func (p *Peer) Handshake() error {
 		select {
 		case err := <-errc:
 			if err != nil {
+				p.Log().Error("bsc handshake error", "err", err, "peer", p.ID())
 				return err
 			}
 		case <-timeout.C:
+			p.Log().Error("bsc handshake timeout", "peer", p.ID())
 			return p2p.DiscReadTimeout
 		}
 	}

@@ -1078,6 +1078,8 @@ func (p *Parlia) assembleVoteAttestation(chain consensus.ChainHeaderReader, head
 			targetHeaderParentSnap = snap
 			break
 		}
+		log.Warn("vote count is less than 2/3 of validators, skip assemble vote attestation", "target_number", targetHeader.Number, "target_hash", targetHeader.Hash(),
+			"votes", len(votes), "quorum", quorum)
 
 		targetHeader = chain.GetHeaderByHash(targetHeader.ParentHash)
 		if targetHeader == nil {

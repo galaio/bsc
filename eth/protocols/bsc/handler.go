@@ -100,6 +100,7 @@ var bsc2 = map[uint64]msgHandler{
 func handleMessage(backend Backend, peer *Peer) error {
 	// Read the next message from the remote peer, and ensure it's fully consumed
 	msg, err := peer.rw.ReadMsg()
+	peer.Log().Trace("bsc received message", "msg", msg.Size, "peer", peer.ID(), "code", msg.Code, "err", err)
 	if err != nil {
 		return err
 	}
