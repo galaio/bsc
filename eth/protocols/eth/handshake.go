@@ -73,8 +73,10 @@ func (p *Peer) handshake68(networkID uint64, chain *core.BlockChain, td *big.Int
 		errc <- p.readStatus68(networkID, &status, genesis.Hash(), forkFilter)
 	}()
 	if err := waitForHandshake(errc, p); err != nil {
+		p.Log().Error("eth handshake68 failed", "err", err)
 		return err
 	}
+	p.Log().Trace("eth handshake68 success", "status", status)
 	p.td, p.head = status.TD, status.Head
 	// TD at mainnet block #7753254 is 76 bits. If it becomes 100 million times
 	// larger, it will still fit within 100 bits
@@ -99,10 +101,12 @@ func (p *Peer) handshake68(networkID uint64, chain *core.BlockChain, td *big.Int
 		errc <- p.readUpgradeStatus(&upgradeStatus)
 	})
 	if err := waitForHandshake(errc, p); err != nil {
+		p.Log().Error("eth handshake68 with upgrade status failed", "err", err)
 		return err
 	}
 	extension, err = upgradeStatus.GetExtension()
 	if err != nil {
+		p.Log().Error("eth handshake68 with upgrade status get extension failed", "err", err)
 		return err
 	}
 	p.statusExtension = extension
@@ -110,6 +114,7 @@ func (p *Peer) handshake68(networkID uint64, chain *core.BlockChain, td *big.Int
 		p.Log().Debug("peer does not need broadcast txs, closing broadcast routines")
 		p.CloseTxBroadcast()
 	}
+	p.Log().Trace("eth handshake68 with upgrade status success", "extension", extension)
 	return nil
 }
 
