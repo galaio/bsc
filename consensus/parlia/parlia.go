@@ -2275,6 +2275,18 @@ func (p *Parlia) GetJustifiedNumberAndHash(chain consensus.ChainHeaderReader, he
 	return snap.Attestation.TargetNumber, snap.Attestation.TargetHash, nil
 }
 
+func (p *Parlia) InturnInfo(chain consensus.ChainHeaderReader, header *types.Header) (common.Address, bool) {
+	snap, err := p.snapshot(chain, header.Number.Uint64()-1, header.ParentHash, nil)
+	if err != nil {
+		log.Error("Unexpected error when getting snapshot",
+			"error", err, "blockNumber", header.Number.Uint64(), "blockHash", header.Hash())
+		return common.Address{}, false
+	}
+	inTurnValidator := snap.inturnValidator()
+	signed := snap.SignRecently(inTurnValidator)
+	return inTurnValidator, signed
+}
+
 // GetFinalizedHeader returns highest finalized block header.
 func (p *Parlia) GetFinalizedHeader(chain consensus.ChainHeaderReader, header *types.Header) *types.Header {
 	if chain == nil || header == nil {

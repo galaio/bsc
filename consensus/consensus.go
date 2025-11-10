@@ -162,6 +162,7 @@ type PoSA interface {
 	IsLocalBlock(header *types.Header) bool
 	GetJustifiedNumberAndHash(chain ChainHeaderReader, headers []*types.Header) (uint64, common.Hash, error)
 	GetFinalizedHeader(chain ChainHeaderReader, header *types.Header) *types.Header
+	InturnInfo(chain ChainHeaderReader, header *types.Header) (common.Address, bool)
 	VerifyVote(chain ChainHeaderReader, vote *types.VoteEnvelope) error
 	IsActiveValidatorAt(chain ChainHeaderReader, header *types.Header, checkVoteKeyFn func(bLSPublicKey *types.BLSPublicKey) bool) bool
 	NextProposalBlock(chain ChainHeaderReader, header *types.Header, proposer common.Address) (uint64, uint64, error)
