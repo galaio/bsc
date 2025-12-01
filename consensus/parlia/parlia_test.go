@@ -1,8 +1,10 @@
 package parlia
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"math/big"
 	mrand "math/rand"
@@ -1346,4 +1348,62 @@ func TestSignBAL_VerifyBAL_Integration(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDecodeExtra_validators(t *testing.T) {
+	testCases := []struct {
+		raw string
+	}{
+		{
+			raw: "3ad55d1d552cc55dee90c0faf0335383b2e6c5ceae5844366094dca50e2769381b1f4bd5b7b40545655322395c25787ad5992a17324cc466a0ed1b1d91433f3299f5fbe451cb3d0f6b77ef8317b31f4aaeaa75e4cff3cca7a6281c80404bbd1ba05bda54acc3bfe8882bbc2688fa98e2a056281634f4d833a19f55d16925a2ff696142d9157b044e5e2a531a825d8b61bcc305a35a7433e9a8920f0fa42d8fd0af73dc1c2a0238545985c0dba04fd57bc2f66573c86cfbb9f2a3cd5c10d6ddb6a588500ef80f2f5b56b8a21b5fda3ff6ea581ea7a5a9c2cb310b13c2126b4e8b97fa9867312aa16ec1c28a414351d21322f2337e04bf34c8b5ad4a1e4cde15d25529165df0a5fa531bf3f02077ee8978abb28e397ae478366271806b4851d81a678e404ba64558efcc199e05b8fc6af0c896168cb9773b5708405f601f265b62885e10586230ba00e1643149ae159c14b63da96bd30d79639bc9c4ed71031bce28216862b80f4b6b80eb78dbc6276316b85c4a64ac8808657b9efa6f532c7466081fe0cb0571ff1afe83d24805534a27e67aacadde6eec79fe02c8ff2374583c47b1d62fdf3e1b72c20ebe298aa632a469439c7ba660bc4419eba498f9ff489b62d53779d257b964bca8af2abf5f797ef746d1e12c031e3640c8b8fb",
+		},
+		{
+			raw: "3ad55d1d552cc55dee90c0faf0335383b2e6c5ceae5844366094dca50e2769381b1f4bd5b7b40545655322395c25787ad5992a17324cc466a0ed1b1d91433f3299f5fbe451cb3d0f6b77ef8317b31f4aaeaa75e4cff3cca7a6281c80404bbd1ba05bda54acc3bfe8882bbc2688fa98e2a056281634f4d833a19f55d16925a2ff696142d9157b044e5fda3ff6ea581ea7a5a9c2cb310b13c2126b4e8b97fa9867312aa16ec1c28a414351d21322f2337e04bf34c8b5ad4a1e4cde15d25529165df0a5fa531bf3f02077ee8978abb28e397ae478366271806b4851d81a678e404ba64558efcc199e05b8fc6af0c896168cb9773b5708405f601f265b62885e10586230ba00e1643149ae159c14b63da96bbcdd0d2cda5f6423e57b6a4dcd75decbe31aecf0b3baf71dc234890671fc3292afde45e20ce83cb8cd65c614be9fa29932c34051a75cbc1e25b968cc72142c91a56b521ad30d79639bc9c4ed71031bce28216862b80f4b6b80eb78dbc6276316b85c4a64ac8808657b9efa6f532c7466081fe0cb0571ff1afe83d24805534a27e67aacadde6eec79fe02c8ff2374583c47b1d62fdf3e1b72c20ebe298aa632a469439c7ba660bc4419eba498f9ff489b62d53779d257b964bca8af2abf5f797ef746d1e12c031e3640c8b8fb",
+		},
+	}
+	for _, tc := range testCases {
+		addresses := []common.Address{}
+		for i := 0; i+40 < len(tc.raw); i += 40 {
+			addresses = append(addresses, common.HexToAddress(tc.raw[i:i+40]))
+		}
+		t.Logf("address: %v", addresses)
+	}
+}
+
+func TestDecodeExtra_turnLength(t *testing.T) {
+	// src := "d883010603846765746888676f312e32342e33856c696e7578000000b61a7b3df8b001b860aac435e40446666cc19439159ddd5ede49abcfa78c98d8f5782379e654fd2e5470d5e6c1815f85f3920fa0481682367a137f97fa6bebf00290402845f33056e7e570428a5ccde6466f3d3c2168635ad9857a4631f8a0e5f6c2417b7c3c16b694f84a8307f71da099c429d2c380fe8490a72bd1881e538b07a16cbf494d2b40fbcf218a554b70478307f71ea050e634712a9b103aa9afc66b8e72240bb54a759decb0af0e849c64c4f0c098f880b4384cc92fd299b7bde4450e8b96d22bc148b7e481826d1bd57eaef5ec8e5cd10212724091134bd1ce95ac80e0473d6571efc7a82a1485cc2db364c7b020c23701"
+	src := "0000000000000000000000000000000000000000000000000000000000000000f8b001b8608f273d9a4cedd79f521d7736fb72f949b2d54668dd8ffb3eb4d99983b8c8a0e67eba08bd0681a81fe6123f6d854a2bf81321d5af5fe112b192cb884ffdd5014271f4d6c8ebfcda16c1665e54166f2eac41d4879c66acfd9205c9ae376e0fbc12f84a8307f71ea050e634712a9b103aa9afc66b8e72240bb54a759decb0af0e849c64c4f0c098f88307f71fa052dd59df71f0476111782b6bbaf63f6da6e3abb8dc13ef3a6bef6a2c2ba94102802ac215a901df6e8dad8aa1d7b1552602d7e68578d3b21c870f7e3db3532d569e5504ef1214950d7f5a8f060899c261ecbc660b4030e9b3dc0567123b26c4108301"
+	extra, err := hex.DecodeString(src)
+	if err != nil {
+		t.Fatalf("Failed to decode extra: %v", err)
+	}
+
+	attestationRaw1 := extra[extraVanity : len(extra)-extraSeal]
+	var attestation1 types.VoteAttestation
+	if err := rlp.Decode(bytes.NewReader(attestationRaw1), &attestation1); err != nil {
+		panic(err)
+	}
+	t.Logf("attestation1: %v", attestation1.VoteAddressSet)
+	t.Logf("attestation1: %v", attestation1.AggSignature)
+	t.Logf("attestation1: %v", attestation1.Data)
+	t.Logf("attestation1: %v", attestation1.Extra)
+
+	// num := int(extra[extraVanity])
+	// t.Logf("validator number: %v", num)
+	// start := extraVanity + validatorNumberSize + num*validatorBytesLength
+	// start += turnLengthSize
+	// end := len(extra) - extraSeal
+	// if end <= start {
+	// 	panic("invalid extra")
+	// }
+	// attestationRaw2 := extra[start:end]
+	// var attestation2 types.VoteAttestation
+	// if err := rlp.Decode(bytes.NewReader(attestationRaw2), &attestation2); err != nil {
+	// 	panic(err)
+	// }
+	// t.Logf("attestation2: %v", attestation2)
+	// t.Logf("attestation2: %v", attestation2.VoteAddressSet)
+	// t.Logf("attestation2: %v", attestation2.AggSignature)
+	// t.Logf("attestation2: %v", attestation2.Data)
+	// t.Logf("attestation2: %v", attestation2.Extra)
 }

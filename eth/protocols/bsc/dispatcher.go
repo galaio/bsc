@@ -56,7 +56,7 @@ func (d *Dispatcher) DispatchRequest(req *Request) (interface{}, error) {
 	d.requests[req.requestID] = req
 	d.mu.Unlock()
 
-	log.Debug("send BlocksByRange request", "code", req.code, "requestId", req.requestID)
+	log.Debug("send BlocksByRange request", "peer", d.peer.id, "code", req.code, "requestId", req.requestID)
 	err := p2p.Send(d.peer.rw, req.code, req.data)
 	if err != nil {
 		return nil, err

@@ -62,6 +62,20 @@ func (api *API) GetValidators(number *rpc.BlockNumber) ([]common.Address, error)
 	return snap.validators(), nil
 }
 
+// GetValidators retrieves the list of validators at the specified block.
+func (api *API) VerifyHeader(number *rpc.BlockNumber) (string, error) {
+	header := api.getHeader(number)
+	// Ensure we have an actually valid block and return the validators from its snapshot
+	if header == nil {
+		return errUnknownBlock.Error(), nil
+	}
+	err := api.parlia.verifyHeader(api.chain, header, nil)
+	if err != nil {
+		return err.Error(), nil
+	}
+	return "ok", nil
+}
+
 // GetValidatorsAtHash retrieves the list of validators at the specified block.
 func (api *API) GetValidatorsAtHash(hash common.Hash) ([]common.Address, error) {
 	header := api.chain.GetHeaderByHash(hash)

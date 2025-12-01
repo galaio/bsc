@@ -450,18 +450,11 @@ func createNodeConfig(baseConfig gethConfig, ip string, port int, enodes []*enod
 	baseConfig.Node.HTTPHost = ip
 	baseConfig.Node.P2P.ListenAddr = fmt.Sprintf(":%d", port)
 	connectEnodes := make([]*enode.Node, 0, len(enodes)-1)
-	// TODO: remove later, just for testing
-	// all nodes will connect to the last 4 nodes
-	rethNodeCnt := 6
 	for j := 0; j < index; j++ {
-		if j >= rethNodeCnt {
-			connectEnodes = append(connectEnodes, enodes[j])
-		}
+		connectEnodes = append(connectEnodes, enodes[j])
 	}
 	for j := index + 1; j < len(enodes); j++ {
-		if j >= rethNodeCnt {
-			connectEnodes = append(connectEnodes, enodes[j])
-		}
+		connectEnodes = append(connectEnodes, enodes[j])
 	}
 	// Set the P2P connections between this node and the other nodes
 	if staticConnect {

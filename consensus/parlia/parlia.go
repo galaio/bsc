@@ -431,6 +431,7 @@ func getVoteAttestationFromHeader(header *types.Header, chainConfig *params.Chai
 		attestationBytes = header.Extra[start:end]
 	}
 
+	log.Debug("got attestationBytes", "headerNumber", header.Number.Uint64(), "epochLength", epochLength, "attestationBytes", len(attestationBytes), "attestationBytes", hex.EncodeToString(attestationBytes))
 	var attestation types.VoteAttestation
 	if err := rlp.Decode(bytes.NewReader(attestationBytes), &attestation); err != nil {
 		return nil, fmt.Errorf("block %d has vote attestation info, decode err: %s", header.Number.Uint64(), err)
@@ -470,6 +471,7 @@ func (p *Parlia) verifyVoteAttestation(chain consensus.ChainHeaderReader, header
 		return err
 	}
 	attestation, err := getVoteAttestationFromHeader(header, chain.Config(), epochLength)
+	log.Debug("verifyVoteAttestation", "headerNumber", header.Number.Uint64(), "epochLength", epochLength, "attestation", attestation, "err", err)
 	if err != nil {
 		return err
 	}
@@ -581,6 +583,12 @@ func (p *Parlia) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 
 	// Don't waste time checking blocks from the future
 	if header.Time > uint64(time.Now().Unix()) {
+		parent, err := p.getParent(chain, header, parents)
+		if err != nil {
+			return err
+		}
+		log.Error("Received future block", "number", header.Number, "hash", header.Hash(), "time", header.Time, "now", time.Now().Unix(),
+			"parent", parent.Hash(), "parentNumber", parent.Number.Uint64(), "parentTime", parent.Time)
 		return consensus.ErrFutureBlock
 	}
 	// Check that the extra-data contains the vanity, validators and signature.
