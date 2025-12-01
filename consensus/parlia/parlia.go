@@ -555,6 +555,9 @@ func (p *Parlia) verifyVoteAttestation(chain consensus.ChainHeaderReader, header
 		}
 		votedAddrs = append(votedAddrs, voteAddr)
 	}
+	log.Debug("verifyVoteAttestation", "headerNumber", header.Number.Uint64(),
+		"epochLength", epochLength, "attestation", attestation, "votedAddrs", votedAddrs,
+		"snap.number", snap.Number, "snap.validators", snap.Validators, "quorum", cmath.CeilDiv(len(snap.Validators)*2, 3))
 	// The valid voted validators should be no less than 2/3 validators.
 	if len(votedAddrs) < cmath.CeilDiv(len(snap.Validators)*2, 3) {
 		return errors.New("invalid attestation, not enough validators voted")
