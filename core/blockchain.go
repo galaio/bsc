@@ -2360,7 +2360,9 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 		inTurnValidator, signed := bc.engine.(consensus.PoSA).InturnInfo(bc, block.Header())
 		td := bc.GetTd(block.Hash(), block.NumberU64())
 		slash := block.Coinbase() != inTurnValidator && !signed
-		log.Info("processBlock done", "block", block.Number(), "hash", block.Hash(), "slash", slash, "inTurnValidator", inTurnValidator, "signed", signed, "miner", block.Coinbase(), "difficulty", block.Difficulty(), "td", td, "justfied", justifiedNumber)
+		log.Info("processBlock done", "block", block.Number(), "hash", block.Hash(), "txs", len(block.Transactions()), "gasUsed", block.GasUsed(),
+			"slash", slash, "inTurnValidator", inTurnValidator, "signed", signed, "miner", block.Coinbase(), "difficulty", block.Difficulty(),
+			"td", td, "justfied", justifiedNumber)
 
 		// Report the import stats before returning the various results
 		stats.processed++
